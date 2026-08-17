@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>内置浏览器（共享视图）</title>
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <div id="tab-strip"></div>
+    <button class="tb" id="btn-new-tab" title="新建标签页" aria-label="新建标签页">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+    </button>
+    <span class="sep"></span>
+    <button class="nav" id="btn-back" title="后退" disabled aria-label="后退">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 3 5.5 8l5 5"/></svg>
+    </button>
+    <button class="nav" id="btn-forward" title="前进" disabled aria-label="前进">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3l5 5-5 5"/></svg>
+    </button>
+    <button class="nav" id="btn-reload" title="刷新" aria-label="刷新">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.65"/><path d="M13.2 2.6v3.2h-3.2"/></svg>
+    </button>
+    <input id="address" placeholder="输入网址，回车打开（用户操作，无需授权）" spellcheck="false" autocomplete="off" />
+    <span class="sep"></span>
+    <button class="tb" id="btn-annotate" title="标注模式：框选页面区域写评论">标注</button>
+    <button class="tb" id="btn-history" title="浏览历史">历史</button>
+    <button class="tb" id="btn-sites" title="站点权限">权限</button>
+    <button class="tb dev" id="btn-devmode" title="Developer Mode">DEV</button>
+  </header>
+
+  <div id="stage-wrap">
+    <div id="stage">
+      <img id="shot" alt="页面截图" draggable="false" />
+      <div id="annotations-layer"></div>
+      <div id="sel-box"></div>
+      <div id="placeholder" class="placeholder">
+        <div class="ph-icon">🌐</div>
+        <p>内置浏览器尚未启动</p>
+        <p class="hint">在地址栏输入网址回车，或让智能体调用 browser_* 工具。<br />页面加载后这里会显示实时共享视图。</p>
+      </div>
+      <iframe id="live-frame" title="iframe 模式（部分站点允许嵌入）"></iframe>
+    </div>
+  </div>
+
+  <footer id="type-bar">
+    <span class="type-label">按键 / 文本</span>
+    <button class="key" data-key="Enter" title="回车">Enter</button>
+    <button class="key" data-key="Tab" title="Tab">Tab</button>
+    <button class="key" data-key="Escape" title="Esc">Esc</button>
+    <input id="type-input" placeholder="在页面中输入文本（点击页面先聚焦）" />
+    <button class="send" id="btn-type">输入</button>
+    <span class="sep"></span>
+    <label class="upload" title="手动上传文件给网页">
+      上传文件
+      <input type="file" id="file-input" multiple />
+    </label>
+    <button class="tb" id="btn-frame" title="切换到 iframe 模式（仅限允许嵌入的站点）">iframe 模式</button>
+  </footer>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+  <script src="./app.js"></script>
+</body>
+</html>

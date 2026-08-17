@@ -12,44 +12,21 @@ The agent gets a full set of `browser_*` tools (navigate / click / type / screen
 
 ## 1. Install
 
-### 1.1 Clone & build
-
 ```bash
-git clone https://github.com/Leeminjing/dsh-browser
-cd dsh-browser
-npm install
-npm run build        # produces lib/
+dsh plugin --profile web add github:Leeminjing/dsh-browser
+pnpm exec playwright install chromium    # browser kernel (~130 MB, one-time)
 ```
 
-### 1.2 Install into the web profile
+Then restart the harness (`dsh web`). The plugin row is mounted automatically by the bundle patch (`dsh.bundle.patch` → `cordis.patch.yml`); no manual config needed.
 
-```bash
-# profile dir: $DSH_HOME/profiles/web
-cd $env:DSH_HOME\profiles\web
-pnpm add file:C:\path\to\dsh-browser playwright
-pnpm exec playwright install chromium   # downloads the browser kernel (~130 MB, one-time)
-```
-
-> After updating the plugin: if you **added new static files** (e.g. `demo-site/watch.html`) since the last install, copy them into the profile copy manually — the profile package is not a symlink, so new files do not propagate:
-> `Copy-Item lib\demo-site\watch.html $env:DSH_HOME\profiles\web\node_modules\dsh-browser\lib\demo-site\`
-
-### 1.3 Enable the plugin row
-
-Edit `$DSH_HOME/profiles/web/cordis.patch.yml`:
-
-```yaml
-- insert:
-    - id: browser
-      name: 'dsh-browser'
-```
+> Dev install (from a local checkout): `npm install && npm run build`, then `pnpm add file:C:\path\to\dsh-browser playwright` and enable the row in `$DSH_HOME/profiles/web/cordis.patch.yml`:
+> ```yaml
+> - insert:
+>     - id: browser
+>       name: 'dsh-browser'
+> ```
 
 Optional env var: `DSH_BROWSER_VIEW_PORT` (shared-view port, default 9333).
-
-### 1.4 Restart
-
-```bash
-dsh web
-```
 
 Then in any conversation ask the agent to open a URL (e.g. `@Browser 打开 http://localhost:3000`). A **🌐 Browser** button appears in the session header — click it to dock the shared view on the right.
 

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>dsh-browser watch</title>
+</head>
+<body>
+<script>
+// ============================================================
+// dsh-browser 轻量监听页（隐藏 iframe 内运行，不属于共享视图本体）
+// 通过 ?session=<会话id> 订阅视图服务器的 SSE 事件流（服务端按会话过滤），
+// 仅当「本会话」的 Agent 发生页面导航（navigated）时，
+// 通过 postMessage 通知宿主页面（DSH GUI）自动弹出共享视图面板。
+// 与视图服务器同源，因此 SSE 无需 CORS。
+// ============================================================
+(function () {
+  try {
+    var session = (new URLSearchParams(location.search)).get("session") || "";
+    var es = new EventSource("/api/events" + (session ? "?session=" + encodeURIComponent(session) : ""));
+    es.addEventListener("message", function (ev) {
+      try {
+        var data = JSON.parse(ev.data);
+        if (data && data.type === "navigated") {
+          window.parent.postMessage({ type: "dsh-browser:show" }, "*");
+        }
+      } catch (e) { /* ignore */ }
+    });
+  } catch (e) { /* EventSource 不可用则静默 */ }
+})();
+</script>
+</body>
+</html>

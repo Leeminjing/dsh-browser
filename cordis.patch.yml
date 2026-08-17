@@ -1,0 +1,6 @@
+# dsh-browser 插件 bundle 的补丁层。
+# 由 package.json 的 `dsh.bundle.patch` 声明；`dsh plugin add` 安装后，
+# 这一 insert 会自动进入 profile 层，把插件挂载为 `browser`。
+- insert:
+    - id: browser
+      name: 'dsh-browser'

@@ -1,0 +1,194 @@
+import type { CDPSession, Page } from "playwright";
+import type { Annotation, BrowserStores } from "./stores.js";
+export interface TabInfo {
+    id: string;
+    url: string;
+    title: string;
+    loading: boolean;
+    canGoBack: boolean;
+    canGoForward: boolean;
+}
+export interface PageElement {
+    index: number;
+    tag: string;
+    role: string;
+    text: string;
+    name: string;
+    href: string;
+    type: string;
+    value: string;
+    disabled: boolean;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+export interface PageSnapshot {
+    url: string;
+    title: string;
+    text: string;
+    elements: PageElement[];
+    at: number;
+}
+export interface ConsoleLogEntry {
+    id: string;
+    level: string;
+    message: string;
+    url: string;
+    ts: number;
+}
+export interface NetworkRequestEntry {
+    id: string;
+    method: string;
+    url: string;
+    status: number;
+    type: string;
+    ts: number;
+}
+export interface BrowserState {
+    tabs: TabInfo[];
+    activeTabId: string | null;
+}
+export type ManagerEvent = {
+    type: "state";
+    state: BrowserState;
+} | {
+    type: "shot";
+    tabId: string;
+    ts: number;
+} | {
+    type: "annotation";
+    annotation: Annotation;
+} | {
+    type: "upload-blocked";
+    tabId: string;
+    url: string;
+} | {
+    type: "navigated";
+    tabId: string;
+    url: string;
+    title: string;
+    actorSession?: string;
+} | {
+    type: "console-log";
+    tabId: string;
+    entry: ConsoleLogEntry;
+} | {
+    type: "network-request";
+    tabId: string;
+    entry: NetworkRequestEntry;
+};
+interface Tab {
+    id: string;
+    page: Page;
+    title: string;
+    url: string;
+    loading: boolean;
+    /** 页面 history.length > 1（可后退） */
+    canGoBackCache: boolean;
+    /** 前进栈（goBack 后记录的 URL；playwright 1.62 已移除 canGoForward） */
+    fwdStack: string[];
+    cdp?: CDPSession;
+    cdpEnabled: boolean;
+    cdpBuffers: {
+        consoleLogs: ConsoleLogEntry[];
+        network: NetworkRequestEntry[];
+    };
+    pendingFileChooser?: {
+        files: Array<{
+            name: string;
+            mimeType: string;
+            buffer: Buffer;
+        }>;
+        resolve: () => void;
+    };
+    /** requestId → {method, url}（Network 事件关联用） */
+    pendingRequests: Map<string, {
+        method: string;
+        url: string;
+    }>;
+}
+export interface BrowserManagerOptions {
+    stores: BrowserStores;
+    profileDir: string;
+    shotsDir: string;
+    viewport?: {
+        width: number;
+        height: number;
+    };
+    headless?: boolean;
+    onEvent?: (ev: ManagerEvent) => void;
+}
+export declare class BrowserManager {
+    private opts;
+    private context;
+    private tabs;
+    private activeId;
+    private seq;
+    private listeners;
+    /** 当前发起浏览器操作的会话（由工具调用设置，用于把导航事件归属到具体会话） */
+    private actorSession;
+    constructor(opts: BrowserManagerOptions);
+    onEvent(cb: (ev: ManagerEvent) => void): void;
+    private emit;
+    /** 记录当前由哪个会话发起浏览器操作（exec.agent.id）。 */
+    setActorSession(sessionId: string): void;
+    get stores(): BrowserStores;
+    ensure(): Promise<void>;
+    private adoptPage;
+    private pushState;
+    private pushShot;
+    state(): Promise<BrowserState>;
+    newTab(url?: string): Promise<string>;
+    closeTab(tabId: string): Promise<void>;
+    setActive(tabId: string): void;
+    active(): Tab | undefined;
+    getTab(tabId: string): Tab | undefined;
+    navigateTo(tabId: string, url: string): Promise<{
+        url: string;
+        title: string;
+        httpStatus: number | null;
+        verified: boolean;
+    }>;
+    private ensureTab;
+    goBack(tabId: string): void;
+    goForward(tabId: string): void;
+    reload(tabId: string): void;
+    findElement(tabId: string, query: string): Promise<PageElement | null>;
+    click(tabId: string, query: string): Promise<PageElement>;
+    /** 按视口坐标点击（用户/视图页操作，spec #9） */
+    clickAt(tabId: string, x: number, y: number): Promise<void>;
+    type(tabId: string, query: string, text: string): Promise<PageElement>;
+    press(tabId: string, key: string): Promise<void>;
+    snapshot(tabId: string): Promise<PageSnapshot>;
+    /** 截图并保存到 shots 目录，返回可访问 URL（spec #5/#13 验证与最终状态）。
+     *  silent 用于视图页自身的轮询刷新：不发 "shot" 事件，避免「截图→事件→再截图」死循环。 */
+    screenshot(tabId: string, opts?: {
+        silent?: boolean;
+    }): Promise<{
+        file: string;
+        url: string;
+        ts: number;
+    }>;
+    /** 截图保留策略：只保留最近 MAX_SHOTS 张，防止磁盘无限增长 */
+    private static readonly MAX_SHOTS;
+    private pruneShots;
+    setAnnotationMode(tabId: string, on: boolean): Promise<void>;
+    listAnnotations(url?: string): Annotation[];
+    provideUpload(tabId: string, files: Array<{
+        name: string;
+        mimeType: string;
+        base64: string;
+    }>): Promise<void>;
+    cdpSession(tabId: string): Promise<CDPSession>;
+    consoleLogs(tabId: string): ConsoleLogEntry[];
+    networkRequests(tabId: string): NetworkRequestEntry[];
+    performanceMetrics(tabId: string): Promise<Array<{
+        name: string;
+        value: number;
+    }>>;
+    evaluate(tabId: string, expression: string): Promise<unknown>;
+    dispose(): Promise<void>;
+    private uid;
+}
+export {};

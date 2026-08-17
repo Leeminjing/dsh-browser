@@ -14,46 +14,22 @@ Agent 获得一组 `browser_*` 工具（导航/点击/输入/截图/观察/历�
 
 ## 1. 安装
 
-### 1.1 克隆并构建
-
 ```bash
-git clone https://github.com/Leeminjing/dsh-browser
-cd dsh-browser
-npm install
-npm run build        # 产出 lib/
+dsh plugin --profile web add github:Leeminjing/dsh-browser
+pnpm exec playwright install chromium    # 下载内置浏览器内核（~130MB，一次性）
 ```
 
-### 1.2 装进 web profile
+然后重启 `dsh web`。插件行由 bundle 补丁自动挂载（`dsh.bundle.patch` → `cordis.patch.yml`），无需手动配置。
 
-```bash
-# profile 目录见 $DSH_HOME/profiles/web
-cd $env:DSH_HOME\profiles\web
-pnpm add file:C:\path\to\dsh-browser playwright
-pnpm exec playwright install chromium   # 下载内置浏览器内核（~130MB，一次性）
-```
-
-> 更新插件后：**每次 `npm run build` 之后，若新增了静态文件（如 `demo-site/watch.html`），
-> 需要把它们同步到 profile 的副本**（profile 里的包不是符号链接，已有文件的修改通常同步，
-> 但新建文件不会）：
-> `Copy-Item lib\demo-site\watch.html $env:DSH_HOME\profiles\web\node_modules\dsh-browser\lib\demo-site\`
-
-### 1.3 启用插件行
-
-编辑 `$DSH_HOME/profiles/web/cordis.patch.yml`，追加：
-
-```yaml
-- insert:
-    - id: browser
-      name: 'dsh-browser'
-```
+> 本地开发安装：`npm install && npm run build` 后，
+> `pnpm add file:C:\path\to\dsh-browser playwright`，并在 `$DSH_HOME/profiles/web/cordis.patch.yml` 手动启用：
+> ```yaml
+> - insert:
+>     - id: browser
+>       name: 'dsh-browser'
+> ```
 
 可选环境变量：`DSH_BROWSER_VIEW_PORT`（共享视图端口，默认 9333）。
-
-### 1.4 重启
-
-```bash
-dsh web
-```
 
 重启后在对话里让 Agent 打开网址（如 `@Browser 打开 http://localhost:3000`）；
 会话头部出现「🌐 浏览器」按钮，点击可在右侧停靠共享视图。

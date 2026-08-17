@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Caspian</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { background: #fff; color: #0f172a; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+  .logo-badge { width: 26px; height: 26px; border-radius: 8px; background: #0d9488; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+  .head-actions { display: flex; align-items: center; gap: 10px; }
+  .head-btn { background: rgba(255,255,255,.1); border: 0; color: #e2e8f0; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+  .head-btn:hover { background: rgba(255,255,255,.2); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: #0d9488; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; position: relative; cursor: pointer; }
+  .avatar::after { content: "2"; position: absolute; top: -5px; right: -5px; background: #dc2626; color: #fff; font-size: 9px; border-radius: 50%; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; }
+  .subbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #e2e8f0; }
+  .subbar .new { font-weight: 700; font-size: 14px; }
+  .status { font-size: 12px; color: #64748b; }
+  .status::before { content: "●"; color: #10b981; margin-right: 4px; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; }
+  .big-logo { width: 64px; height: 64px; border-radius: 18px; background: #0d9488; color: #fff; font-size: 34px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  h1 { font-size: 26px; font-weight: 700; }
+  .actions { display: flex; gap: 10px; margin-top: 4px; }
+  .action-btn { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 10px; padding: 9px 16px; font-size: 13.5px; cursor: pointer; }
+  .action-btn:hover { background: #f8fafc; border-color: #0d9488; color: #0d9488; }
+  .composer { width: min(560px, 92vw); display: flex; align-items: center; gap: 8px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 8px 10px; background: #fff; }
+  .composer input { flex: 1; border: 0; outline: 0; font-size: 14px; }
+  .composer .send { width: 32px; height: 32px; border: 0; border-radius: 9px; background: #0d9488; color: #fff; font-size: 15px; cursor: pointer; }
+  .view { display: none; width: 100%; max-width: 720px; margin: 0 auto; padding: 16px; }
+  .view.active { display: block; }
+  .board-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .board-head h2 { font-size: 17px; }
+  .new-task-btn { background: #0d9488; color: #fff; border: 0; border-radius: 9px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .task-form { display: none; gap: 8px; margin-bottom: 12px; }
+  .task-form.active { display: flex; }
+  .task-form input { flex: 1; border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: 0; }
+  .task-form input:focus { border-color: #0d9488; }
+  .task-form button { border: 0; border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
+  .task-form .create { background: #0d9488; color: #fff; }
+  .task-form .cancel { background: #f1f5f9; color: #334155; }
+  .task-card { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: #f8fafc; }
+  .task-card .t-title { font-size: 13.5px; font-weight: 600; }
+  .task-card .t-meta { font-size: 11.5px; color: #64748b; margin-top: 2px; }
+  .task-card .del { border: 1px solid #fecaca; background: #fff; color: #dc2626; border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .task-card .del:hover { background: #fef2f2; }
+  .login-modal { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .login-modal.active { display: flex; }
+  .login-box { background: #fff; border-radius: 14px; padding: 22px; width: 300px; box-shadow: 0 24px 64px rgba(0,0,0,.3); }
+  .login-box h3 { font-size: 15px; margin-bottom: 12px; }
+  .login-box input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; outline: 0; }
+  .login-box button { width: 100%; border: 0; background: #0d9488; color: #fff; border-radius: 8px; padding: 9px; font-size: 13px; cursor: pointer; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #0f172a; color: #e2e8f0; padding: 8px 16px; border-radius: 10px; font-size: 12.5px; z-index: 100; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .file-zone { margin-top: 12px; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 16px; text-align: center; font-size: 12.5px; color: #64748b; }
+  .file-zone input[type=file] { margin-top: 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo"><div class="logo-badge">C</div><span>Caspian</span></div>
+    <div class="head-actions">
+      <button class="head-btn" title="新建">+</button>
+      <button class="head-btn" title="通知">🔔</button>
+      <div class="avatar" title="账户">U</div>
+    </div>
+  </header>
+  <div class="subbar">
+    <span class="new">新会话</span>
+    <span class="status">就绪</span>
+  </div>
+
+  <main>
+    <div id="view-landing" class="view active">
+      <div class="big-logo">C</div>
+      <h1>把目标交给 Caspian</h1>
+      <div class="actions">
+        <button class="action-btn" id="btn-analyze">分析项目需求</button>
+        <button class="action-btn" id="btn-execute">基于资料执行</button>
+      </div>
+    </div>
+
+    <div id="view-board" class="view">
+      <div class="board-head">
+        <h2>任务台</h2>
+        <button class="new-task-btn" id="btn-new-task">+ 新建任务</button>
+      </div>
+      <div class="task-form" id="task-form">
+        <input id="task-title" placeholder="输入任务标题…" />
+        <button class="create" id="btn-create">创建</button>
+        <button class="cancel" id="btn-cancel-form">取消</button>
+      </div>
+      <div id="task-list"></div>
+      <div class="file-zone">
+        附件上传区（spec #8：内置浏览器不能自动完成文件上传）
+        <input type="file" id="file-input" />
+      </div>
+    </div>
+  </main>
+
+  <div class="login-modal" id="login-modal">
+    <div class="login-box">
+      <h3>登录 Caspian</h3>
+      <input placeholder="邮箱 / 用户名" />
+      <input type="password" placeholder="密码" />
+      <button id="btn-login">登录</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  let tasks = JSON.parse(localStorage.getItem("caspian-tasks") || "[]");
+  const renderTasks = () => {
+    const list = $("#task-list");
+    list.innerHTML = "";
+    if (tasks.length === 0) {
+      list.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:16px 0;">暂无任务，点击「+ 新建任务」创建。</div>';
+      return;
+    }
+    tasks.forEach((t, i) => {
+      const card = document.createElement("div");
+      card.className = "task-card";
+      card.innerHTML = `
+        <div>
+          <div class="t-title"></div>
+          <div class="t-meta">创建于 ${t.ts} · 状态：进行中</div>
+        </div>
+        <button class="del">删除</button>`;
+      card.querySelector(".t-title").textContent = t.title;
+      card.querySelector(".del").addEventListener("click", () => {
+        tasks.splice(i, 1);
+        localStorage.setItem("caspian-tasks", JSON.stringify(tasks));
+        renderTasks();
+        showToast("任务已删除");
+      });
+      list.appendChild(card);
+    });
+  };
+  const showView = (id) => {
+    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+    $("#" + id).classList.add("active");
+  };
+  const showToast = (msg) => {
+    const t = $("#toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 2200);
+  };
+
+  $("#btn-analyze").addEventListener("click", () => {
+    showView("view-board");
+    tasks.unshift({ title: "分析项目需求（来自首页快捷入口）", ts: new Date().toLocaleString() });
+    localStorage.setItem("caspian-tasks", JSON.stringify(tasks));
+    renderTasks();
+    showToast("已创建「分析项目需求」任务");
+  });
+  $("#btn-execute").addEventListener("click", () => {
+    showView("view-board");
+    tasks.unshift({ title: "基于资料执行（来自首页快捷入口）", ts: new Date().toLocaleString() });
+    localStorage.setItem("caspian-tasks", JSON.stringify(tasks));
+    renderTasks();
+    showToast("已创建「基于资料执行」任务");
+  });
+
+  $("#btn-new-task").addEventListener("click", () => {
+    $("#task-form").classList.add("active");
+    $("#task-title").focus();
+  });
+  $("#btn-cancel-form").addEventListener("click", () => {
+    $("#task-form").classList.remove("active");
+    $("#task-title").value = "";
+  });
+  const createTask = () => {
+    const title = $("#task-title").value.trim();
+    if (!title) { $("#task-title").focus(); return; }
+    tasks.unshift({ title, ts: new Date().toLocaleString() });
+    localStorage.setItem("caspian-tasks", JSON.stringify(tasks));
+    $("#task-form").classList.remove("active");
+    $("#task-title").value = "";
+    renderTasks();
+    showToast("任务已创建");
+  };
+  $("#btn-create").addEventListener("click", createTask);
+  $("#task-title").addEventListener("keydown", (e) => { if (e.key === "Enter") createTask(); });
+
+  // 文件上传（spec #8 演示：交给用户手动完成）
+  $("#file-input").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) showToast("文件已由用户手动选择：" + f.name);
+  });
+
+  // 头像 → 登录弹窗（spec #9 用户手动介入演示）
+  $(".avatar").addEventListener("click", () => $("#login-modal").classList.add("active"));
+  $("#btn-login").addEventListener("click", () => {
+    $("#login-modal").classList.remove("active");
+    showToast("登录成功（用户手动登录）");
+  });
+
+  renderTasks();
+</script>
+</body>
+</html>
