@@ -81,14 +81,14 @@ html, body {
 
 /* ---- 页面舞台 ---- */
 #stage-wrap {
-  flex: 1; overflow: auto; position: relative;
+  flex: 1; overflow: hidden; position: relative;
   background-color: var(--bg);
   background-image: radial-gradient(rgba(28, 36, 51, .06) 1px, transparent 1px);
   background-size: 18px 18px;
 }
 #stage {
   position: relative; width: 1280px; min-height: 800px;
-  margin: 18px auto; background: #fff;
+  margin: 0 auto; background: #fff;
   box-shadow: var(--shadow-md); border-radius: 12px; overflow: hidden;
 }
 #shot { display: block; width: 1280px; height: 800px; user-select: none; }

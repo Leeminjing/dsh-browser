@@ -8,6 +8,9 @@ diag-*.cjs
 verify-*.cjs
 probe-*.cjs
 panel-*.cjs
+test-*.cjs
+measure-*.cjs
+check-*.cjs
 *.png
 
 # 系统

@@ -35,6 +35,8 @@ export class ViewServer {
   private sseClients = new Set<http.ServerResponse>();
   /** SSE 客户端的会话过滤（watch 页用 ?session= 订阅，只收到该会话的导航事件） */
   private sseSessions = new WeakMap<http.ServerResponse, string>();
+  /** 实时帧流客户端（/api/screencast） */
+  private streamClients = new Set<http.ServerResponse>();
   private host: string;
 
   constructor(private opts: ViewServerOptions) {
@@ -70,6 +72,17 @@ export class ViewServer {
     }
     if (!this.server) throw new Error("无法绑定共享视图端口（9333 起 20 个端口均被占用）");
     this.opts.manager.onEvent((ev) => this.broadcast(ev));
+    // 实时帧流：CDP screencast 帧 → 推给所有 /api/screencast 订阅者
+    this.opts.manager.onScreencastFrame((frame) => {
+      const msg = `data: ${JSON.stringify({ type: "frame", data: frame.data, meta: frame.meta })}\n\n`;
+      for (const client of this.streamClients) {
+        try {
+          client.write(msg);
+        } catch {
+          this.streamClients.delete(client);
+        }
+      }
+    });
   }
 
   stop(): void {
@@ -79,6 +92,8 @@ export class ViewServer {
       /* ignore */
     }
     this.server = null;
+    this.streamClients.clear();
+    void this.opts.manager.stopScreencast().catch(() => {});
   }
 
   private sendJson(res: http.ServerResponse, status: number, data: unknown): void {
@@ -173,6 +188,28 @@ export class ViewServer {
         return;
       }
 
+      // ---- 实时帧流（CDP screencast）----
+      if (method === "GET" && p === "/api/screencast") {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+        res.write("retry: 3000\n\n");
+        this.streamClients.add(res);
+        // 第一个订阅者到达时启动帧流
+        if (this.streamClients.size === 1) {
+          manager.startScreencast().catch((err) => {
+            console.error("[dsh-browser] screencast 启动失败（回退截图模式）:", err?.message ?? err);
+          });
+        }
+        req.on("close", () => {
+          this.streamClients.delete(res);
+          if (this.streamClients.size === 0) void manager.stopScreencast().catch(() => {});
+        });
+        return;
+      }
+
       // ---- API ----
       if (p === "/api/state" && method === "GET") {
         return this.sendJson(res, 200, {
@@ -188,6 +225,15 @@ export class ViewServer {
         const silent = url.searchParams.get("noevent") === "1";
         const shot = await manager.screenshot(String(url.searchParams.get("tab") ?? ""), { silent });
         return this.serveFile(res, shot.file);
+      }
+
+      // 鼠标移动注入（hover 反馈；坐标按视口 CSS 像素）
+      if (p === "/api/input" && method === "POST") {
+        const body = await this.readBody(req);
+        const tab = manager.active();
+        if (!tab) return this.sendJson(res, 400, { ok: false, error: "没有打开的标签页" });
+        await manager.mouseMove(tab.id, Number(body.x ?? 0), Number(body.y ?? 0));
+        return this.sendJson(res, 200, { ok: true });
       }
 
       if (p === "/api/navigate" && method === "POST") {

@@ -78,6 +78,19 @@ export type ManagerEvent = {
     tabId: string;
     entry: NetworkRequestEntry;
 };
+/** CDP screencast 单帧（base64 JPEG + 视口元数据） */
+export interface ScreencastFrame {
+    data: string;
+    meta: {
+        pageScaleFactor: number;
+        deviceWidth: number;
+        deviceHeight: number;
+        scrollOffsetX: number;
+        scrollOffsetY: number;
+        offsetTop: number;
+        offsetBottom: number;
+    };
+}
 interface Tab {
     id: string;
     page: Page;
@@ -128,12 +141,23 @@ export declare class BrowserManager {
     private listeners;
     /** 当前发起浏览器操作的会话（由工具调用设置，用于把导航事件归属到具体会话） */
     private actorSession;
+    /** 实时帧流（CDP screencast）：与 DevMode 门控的 cdpSession 相互独立 */
+    private streamCdp;
+    private streamTabId;
+    private streamFrameListeners;
     constructor(opts: BrowserManagerOptions);
     onEvent(cb: (ev: ManagerEvent) => void): void;
     private emit;
     /** 记录当前由哪个会话发起浏览器操作（exec.agent.id）。 */
     setActorSession(sessionId: string): void;
     get stores(): BrowserStores;
+    onScreencastFrame(cb: (frame: ScreencastFrame) => void): void;
+    private emitFrame;
+    /** 开始对指定标签页做 CDP screencast 实时帧流（无 DevMode 依赖） */
+    startScreencast(tabId?: string): Promise<void>;
+    stopScreencast(): Promise<void>;
+    /** 只注入鼠标移动（hover 反馈）；坐标按视口 CSS 像素 */
+    mouseMove(tabId: string, x: number, y: number): Promise<void>;
     ensure(): Promise<void>;
     private adoptPage;
     private pushState;

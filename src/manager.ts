@@ -72,6 +72,20 @@ export type ManagerEvent =
   | { type: "console-log"; tabId: string; entry: ConsoleLogEntry }
   | { type: "network-request"; tabId: string; entry: NetworkRequestEntry };
 
+/** CDP screencast 单帧（base64 JPEG + 视口元数据） */
+export interface ScreencastFrame {
+  data: string;
+  meta: {
+    pageScaleFactor: number;
+    deviceWidth: number;
+    deviceHeight: number;
+    scrollOffsetX: number;
+    scrollOffsetY: number;
+    offsetTop: number;
+    offsetBottom: number;
+  };
+}
+
 interface Tab {
   id: string;
   page: Page;
@@ -168,6 +182,8 @@ const FOCUS_INPUT_SCRIPT = (query: string) => `
     const ql = q.toLowerCase();
     const all = document.querySelectorAll('input,textarea,select,[contenteditable="true"]');
     for (const el of all) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue; // 跳过隐藏/不可见元素（如登录页残留输入框）
       const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().replace(/\\s+/g, ' ');
       const name = (el.getAttribute('name') || el.getAttribute('id') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim();
       if (text.toLowerCase() === ql || text.toLowerCase().includes(ql) || name.toLowerCase() === ql || name.toLowerCase().includes(ql)) {
@@ -187,6 +203,10 @@ export class BrowserManager {
   private listeners: Array<(ev: ManagerEvent) => void> = [];
   /** 当前发起浏览器操作的会话（由工具调用设置，用于把导航事件归属到具体会话） */
   private actorSession = "";
+  /** 实时帧流（CDP screencast）：与 DevMode 门控的 cdpSession 相互独立 */
+  private streamCdp: CDPSession | null = null;
+  private streamTabId: string | null = null;
+  private streamFrameListeners: Array<(frame: ScreencastFrame) => void> = [];
 
   constructor(private opts: BrowserManagerOptions) {}
 
@@ -206,6 +226,98 @@ export class BrowserManager {
     return this.opts.stores;
   }
 
+  // ---- 实时帧流（Codex 式共享视图：CDP screencast）----
+
+  onScreencastFrame(cb: (frame: ScreencastFrame) => void): void {
+    this.streamFrameListeners.push(cb);
+  }
+  private emitFrame(frame: ScreencastFrame): void {
+    for (const cb of this.streamFrameListeners) {
+      try {
+        cb(frame);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /** 开始对指定标签页做 CDP screencast 实时帧流（无 DevMode 依赖） */
+  async startScreencast(tabId?: string): Promise<void> {
+    await this.ensure();
+    const tab = this.tabs.get(tabId ?? "") ?? this.active();
+    if (!tab) throw new Error("没有打开的浏览器标签页");
+    if (this.streamTabId === tab.id && this.streamCdp) return;
+    await this.stopScreencast();
+    const cdp = await this.context!.newCDPSession(tab.page);
+    this.streamCdp = cdp;
+    this.streamTabId = tab.id;
+    cdp.on("Page.screencastFrame", (params) => {
+      const p = params as { data?: string; sessionId?: number; metadata?: Partial<ScreencastFrame["meta"]> };
+      if (!p.data) return;
+      const m = p.metadata ?? {};
+      this.emitFrame({
+        data: p.data,
+        meta: {
+          pageScaleFactor: Number(m.pageScaleFactor ?? 1),
+          deviceWidth: Number(m.deviceWidth ?? 1280),
+          deviceHeight: Number(m.deviceHeight ?? 800),
+          scrollOffsetX: Number(m.scrollOffsetX ?? 0),
+          scrollOffsetY: Number(m.scrollOffsetY ?? 0),
+          offsetTop: Number(m.offsetTop ?? 0),
+          offsetBottom: Number(m.offsetBottom ?? 0),
+        },
+      });
+      // 必须 ACK，否则浏览器停止推帧
+      if (typeof p.sessionId === "number") {
+        void cdp.send("Page.screencastFrameAck", { sessionId: p.sessionId }).catch(() => {});
+      }
+    });
+    try {
+      await cdp.send("Page.enable");
+      await cdp.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: 70,
+        maxWidth: 1280,
+        maxHeight: 800,
+        everyNthFrame: 1,
+      });
+    } catch (err) {
+      this.streamCdp = null;
+      this.streamTabId = null;
+      try {
+        cdp.detach();
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
+  }
+
+  async stopScreencast(): Promise<void> {
+    const cdp = this.streamCdp;
+    this.streamCdp = null;
+    this.streamTabId = null;
+    if (cdp) {
+      try {
+        await cdp.send("Page.stopScreencast");
+      } catch {
+        /* ignore */
+      }
+      try {
+        cdp.detach();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /** 只注入鼠标移动（hover 反馈）；坐标按视口 CSS 像素 */
+  async mouseMove(tabId: string, x: number, y: number): Promise<void> {
+    const t = this.tabs.get(tabId) ?? this.active();
+    if (!t) return;
+    await t.page.mouse.move(x, y);
+  }
+
   async ensure(): Promise<void> {
     if (this.context) return;
     // 动态导入 playwright：缺失时给出清晰错误，不影响 harness 启动
@@ -220,6 +332,8 @@ export class BrowserManager {
     const context = await chromium.launchPersistentContext(this.opts.profileDir, {
       headless: this.opts.headless ?? true,
       viewport: this.opts.viewport ?? { width: 1280, height: 800 },
+      // DPR 2：截图 2x（2560×1600），在高分屏/缩放显示下共享视图依然清晰
+      deviceScaleFactor: 2,
       acceptDownloads: false,
       locale: "zh-CN",
     });
@@ -319,6 +433,7 @@ export class BrowserManager {
     });
     page.on("close", () => {
       this.tabs.delete(tab.id);
+      if (this.streamTabId === tab.id) void this.stopScreencast();
       if (this.activeId === tab.id) this.activeId = this.tabs.keys().next().value ?? null;
       this.pushState();
     });
@@ -353,6 +468,7 @@ export class BrowserManager {
     const page = await this.context!.newPage();
     const tab = await this.adoptPage(page);
     if (url) await this.navigateTo(tab.id, url);
+    if (this.streamCdp) void this.startScreencast(tab.id);
     return tab.id;
   }
   async closeTab(tabId: string): Promise<void> {
@@ -367,6 +483,8 @@ export class BrowserManager {
   setActive(tabId: string): void {
     if (this.tabs.has(tabId)) {
       this.activeId = tabId;
+      // 实时帧流跟随活动标签
+      if (this.streamCdp) void this.startScreencast(tabId);
       this.pushState();
     }
   }
@@ -509,12 +627,25 @@ export class BrowserManager {
       }
       await t.page.evaluate(FOCUS_INPUT_SCRIPT(query));
     } else {
-      // * → 聚焦第一个输入框（不要求 findElement 命中）
+      // * → 优先输入到「当前已聚焦」的可见输入框（用户点击哪个字段就输入到哪）；
+      // 否则聚焦第一个可见输入框（跳过隐藏元素，如登录页残留输入框）
       await t.page.evaluate(
-        `(() => { const el = document.querySelector('input,textarea,[contenteditable="true"]'); if (el) el.focus(); return !!el; })()`,
+        `(() => {
+          const ae = document.activeElement;
+          const isField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+          if (isField) {
+            const r = ae.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) return true;
+          }
+          const els = [...document.querySelectorAll('input,textarea,[contenteditable="true"]')];
+          const el = els.find((e) => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2; }) || null;
+          if (el) el.focus();
+          return !!el;
+        })()`,
       );
     }
-    await t.page.keyboard.type(text, { delay: 8 });
+    // 瞬时注入文本（不经逐字键盘事件，减少输入延迟；触发 input 事件，兼容受控表单）
+    await t.page.keyboard.insertText(text);
     // 视图同步：输入内容后刷新共享视图
     this.pushState();
     return el ?? { index: 0, tag: "input", role: "", text: "", name: "", href: "", type: "", value: "", disabled: false, x: 0, y: 0, w: 0, h: 0 };
@@ -697,6 +828,7 @@ export class BrowserManager {
   }
 
   async dispose(): Promise<void> {
+    await this.stopScreencast().catch(() => {});
     try {
       await this.context?.close();
     } catch {

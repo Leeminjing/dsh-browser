@@ -16,6 +16,8 @@ export declare class ViewServer {
     private sseClients;
     /** SSE 客户端的会话过滤（watch 页用 ?session= 订阅，只收到该会话的导航事件） */
     private sseSessions;
+    /** 实时帧流客户端（/api/screencast） */
+    private streamClients;
     private host;
     constructor(opts: ViewServerOptions);
     get baseUrl(): string;

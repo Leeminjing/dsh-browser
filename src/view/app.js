@@ -37,6 +37,29 @@ const state = {
   shotTs: 0,
 };
 
+// ---- 自适应缩放（fit-to-width）----
+// 舞台原始尺寸 1280×800；面板/窗口较窄时按宽度等比缩放，
+// 整页可见、可直接点击；点击/标注坐标按比例换算回原生坐标。
+const STAGE_W = 1280;
+const STAGE_H = 800;
+let viewScale = 1;
+
+function applyScale() {
+  const wrap = $("#stage-wrap");
+  const stage = $("#stage");
+  if (!wrap || !stage) return;
+  viewScale = Math.min(1, wrap.clientWidth / STAGE_W);
+  stage.style.transformOrigin = "center center";
+  if (viewScale < 1) {
+    stage.style.transform = `scale(${viewScale})`;
+    stage.style.height = Math.round(STAGE_H * viewScale) + "px";
+  } else {
+    stage.style.transform = "";
+    stage.style.height = STAGE_H + "px";
+  }
+}
+window.addEventListener("resize", applyScale);
+
 function toast(text, kind) {
   const el = document.createElement("div");
   el.className = "toast" + (kind ? " " + kind : "");
@@ -56,6 +79,7 @@ async function refreshState() {
   renderAddress();
   renderDevBadge();
   renderAnnotations();
+  applyScale();
   if (state.tabs.length === 0) {
     $("#placeholder").classList.add("show");
     $("#shot").style.display = "none";
@@ -66,10 +90,12 @@ async function refreshState() {
   }
 }
 
-// 截图刷新：带 noevent（不触发 shot 事件，避免截图→事件→再截图死循环）并做 300ms 防抖
+// 截图刷新：带 noevent（不触发 shot 事件，避免截图→事件→再截图死循环）并做 300ms 防抖。
+// 实时帧流（screencast）开启时跳过截图刷新（帧流自带持续更新）。
 let shotTimer = null;
+let streaming = false;
 function refreshShot() {
-  if (state.tabs.length === 0) return;
+  if (streaming || state.tabs.length === 0) return;
   if (shotTimer) clearTimeout(shotTimer);
   shotTimer = setTimeout(() => {
     shotTimer = null;
@@ -77,6 +103,35 @@ function refreshShot() {
     const tab = state.activeTabId ?? state.tabs[0].id;
     $("#shot").src = `/api/screenshot?tab=${encodeURIComponent(tab)}&t=${state.shotTs}&noevent=1`;
   }, 300);
+}
+
+// ---- 实时帧流（CDP screencast，Codex 式实时共享视图）----
+// 帧走 SSE 到达，直接渲染到 #shot；断线自动回退截图模式。
+function connectStream() {
+  let es = null;
+  try {
+    es = new EventSource("/api/screencast");
+  } catch (e) {
+    return;
+  }
+  es.addEventListener("open", () => {
+    streaming = true;
+  });
+  es.addEventListener("message", (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (d.type === "frame" && typeof d.data === "string") {
+        $("#shot").src = "data:image/jpeg;base64," + d.data;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  });
+  es.addEventListener("error", () => {
+    streaming = false;
+    // 回退截图模式：立即刷新一次
+    void refreshState().catch(() => {});
+  });
 }
 
 // ---- 标签页 ----
@@ -166,28 +221,83 @@ function toggleAnnotate() {
   toast(state.annotateMode ? "标注模式：在页面上拖拽框选区域 → 写评论" : "标注模式已关闭", state.annotateMode ? "ok" : undefined);
 }
 
-// 截图上的点击（spec #9 用户手动操作）
+// 截图上的点击（spec #9 用户手动操作；坐标按缩放比换算回原生）
+// 点击后自动聚焦底部输入栏：选中字段后直接打字、回车即发送到该字段
 let clickMode = false;
 $("#shot").addEventListener("click", (e) => {
   if (state.annotateMode) return;
   const rect = e.target.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const x = (e.clientX - rect.left) / viewScale;
+  const y = (e.clientY - rect.top) / viewScale;
   void api.post("/api/click", { x, y }).then(() => refreshShot());
 });
 $("#shot").addEventListener("mousemove", (e) => {
   if (state.annotateMode) return;
   const rect = e.target.getBoundingClientRect();
-  $("#shot").title = `点击坐标 (${Math.round(e.clientX - rect.left)}, ${Math.round(e.clientY - rect.top)})`;
+  const x = (e.clientX - rect.left) / viewScale;
+  const y = (e.clientY - rect.top) / viewScale;
+  $("#shot").title = `点击坐标 (${Math.round(x)}, ${Math.round(y)})`;
+  // hover 直通（节流 ~25/s）：注入鼠标移动，页面 hover 效果会随帧流实时显示
+  const now = Date.now();
+  if (now - lastHoverTs > 40) {
+    lastHoverTs = now;
+    void api.post("/api/input", { x: Math.round(x), y: Math.round(y) });
+  }
+});
+let lastHoverTs = 0;
+
+// ---- 键盘直通（直接操作页面）----
+// 点击页面（截图）后，键盘按键直接转发给内置浏览器当前聚焦的字段：
+// 可打印字符走防抖批量 type，功能键（回车/Tab/退格/方向键）走 press。
+// 当焦点在底部输入栏/地址栏等输入框内时不拦截，正常输入。
+let typeBuffer = "";
+let flushTimer = null;
+function flushPageType() {
+  if (!typeBuffer) return;
+  const text = typeBuffer;
+  typeBuffer = "";
+  void api.post("/api/type", { text }).then(refreshShot);
+}
+function pressPageKey(key) {
+  void api.post("/api/press", { key }).then(refreshShot);
+}
+window.addEventListener("keydown", (e) => {
+  const ae = document.activeElement;
+  const inField = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable);
+  if (inField || state.annotateMode || state.iframeMode) return;
+  if (e.isComposing || e.keyCode === 229) return; // IME 组合中不转发
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // 保留快捷键
+  if (e.key.length === 1) {
+    typeBuffer += e.key;
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = setTimeout(flushPageType, 120); // 防抖 120ms：打字响应快又不逐键发请求
+    e.preventDefault();
+    return;
+  }
+  if (e.key === "Backspace") {
+    if (typeBuffer.length > 0) {
+      typeBuffer = typeBuffer.slice(0, -1);
+    } else {
+      pressPageKey("Backspace");
+    }
+    e.preventDefault();
+    return;
+  }
+  if (["Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Delete", "Home", "End"].includes(e.key)) {
+    if (typeBuffer) flushPageType();
+    pressPageKey(e.key);
+    e.preventDefault();
+    return;
+  }
 });
 
-// 标注框选（在截图叠加层上拖拽）
+// 标注框选（在截图叠加层上拖拽；坐标统一换算为原生坐标系）
 let dragging = false, sx = 0, sy = 0;
 $("#shot").addEventListener("mousedown", (e) => {
   if (!state.annotateMode) return;
   const rect = e.target.getBoundingClientRect();
-  sx = e.clientX - rect.left;
-  sy = e.clientY - rect.top;
+  sx = (e.clientX - rect.left) / viewScale;
+  sy = (e.clientY - rect.top) / viewScale;
   dragging = true;
   const box = $("#sel-box");
   box.style.display = "block";
@@ -199,7 +309,7 @@ $("#shot").addEventListener("mousedown", (e) => {
 $("#shot").addEventListener("mousemove", (e) => {
   if (!dragging) return;
   const rect = e.target.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const x = (e.clientX - rect.left) / viewScale, y = (e.clientY - rect.top) / viewScale;
   const box = $("#sel-box");
   box.style.left = Math.min(sx, x) + "px";
   box.style.top = Math.min(sy, y) + "px";
@@ -210,7 +320,7 @@ $("#shot").addEventListener("mouseup", (e) => {
   if (!dragging) return;
   dragging = false;
   const rect = e.target.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const x = (e.clientX - rect.left) / viewScale, y = (e.clientY - rect.top) / viewScale;
   const box = $("#sel-box");
   box.style.display = "none";
   const w = Math.abs(x - sx), h = Math.abs(y - sy);
@@ -532,4 +642,7 @@ function connectEvents() {
 }
 
 // ---- 启动 ----
-refreshState().then(connectEvents).catch((err) => toast("加载失败：" + err.message, "warn"));
+refreshState().then(() => {
+  connectEvents();
+  connectStream();
+}).catch((err) => toast("加载失败：" + err.message, "warn"));
