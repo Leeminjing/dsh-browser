@@ -1,0 +1,48 @@
+{
+  "name": "dsh-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness 内置浏览器插件：Agent 浏览器工具 + 共享视图 + 站点权限/高风险确认/页面标注/浏览历史/Developer Mode（13 条 spec）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./client/client.d.ts",
+      "default": "./client/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-user-questions": "^0.1.0-rc.6",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.10"
+  }
+}

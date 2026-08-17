@@ -1,0 +1,17 @@
+# 依赖与构建产物
+node_modules/
+lib/
+client/client.js
+
+# 调试/临时文件
+repro/
+shots/
+diag-*.cjs
+verify-*.cjs
+probe-*.cjs
+panel-*.cjs
+*.png
+
+# 系统
+.DS_Store
+Thumbs.db
