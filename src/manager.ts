@@ -317,7 +317,8 @@ export class BrowserManager {
 
   /** 共享面板自适应：调整当前标签页视口尺寸 → 页面响应式重排，帧流 1:1 铺满面板 */
   async resizeViewport(width: number, height: number): Promise<void> {
-    await this.ensure();
+    // 浏览器尚未启动时不做任何事（保留占位页；首个标签页打开后会随面板尺寸调整）
+    if (!this.context) return;
     const tab = this.active();
     if (!tab) return;
     const w = Math.max(320, Math.min(4096, Math.round(width)));
