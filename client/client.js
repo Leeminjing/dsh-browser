@@ -127,6 +127,8 @@ window.__ModuleLoader__.load({
       widthRef.current = width;
       var dragRef = react.useRef(null);
       var [dragging, setDragging] = react.useState(false);
+      // 宿主自动拉起外部浏览器时打开 GUI 的地址带 ?dsh-browser=open：首次会话激活即自动展开面板
+      var autoOpen = typeof location !== "undefined" && String(location.search).indexOf("dsh-browser=open") >= 0;
 
       react.useEffect(function () {
         // 头部按钮点击：开合面板，并记录归属会话（打开时）
@@ -146,6 +148,12 @@ window.__ModuleLoader__.load({
         // 会话切换：当激活的会话与面板归属会话不一致时，自动收起（跨会话隔离）
         var onSessionActive = function (e) {
           var sid = e && e.detail ? e.detail.sessionId : null;
+          if (autoOpen && sid) {
+            autoOpen = false;
+            ownerRef.current = sid;
+            setOpen(true);
+            return;
+          }
           if (openRef.current && sid && sid !== ownerRef.current) {
             ownerRef.current = null;
             setOpen(false);

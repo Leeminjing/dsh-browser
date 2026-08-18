@@ -117,6 +117,12 @@ export interface BrowserManagerOptions {
   /** 外部浏览器模式（路线 C）：设为用户浏览器 CDP 地址（如 http://127.0.0.1:9222）。
    *  直接连接用户浏览器并驱动共享视图面板内的目标 iframe——原生渲染、实时同步，无隔离。 */
   cdpUrl?: string;
+  /** 自动拉起外部浏览器时打开的 GUI 地址（默认 http://127.0.0.1:3080） */
+  guiUrl?: string;
+  /** 共享视图基础地址（标记/识别帧用） */
+  viewBase?: string;
+  /** 禁止自动拉起外部浏览器（DSH_BROWSER_NO_AUTO_LAUNCH=1） */
+  noAutoLaunch?: boolean;
   onEvent?: (ev: ManagerEvent) => void;
 }
 
@@ -247,15 +253,90 @@ export class BrowserManager {
   }
 
   /**
-   * 视图打开时调用：若配置了 DSH_BROWSER_CDP_URL 或探测到调试浏览器，则建立外部连接；
-   * 否则什么都不做（保持占位页）。探测失败/无调试浏览器时开销极小（连接拒绝即刻返回）。
+   * 视图打开时调用：一键进入外部浏览器模式（路线 C）。
+   *  1) 已配置 DSH_BROWSER_CDP_URL 或探测到调试浏览器 → 直接连接；
+   *  2) 否则自动拉起一个带调试端口的浏览器窗口（用户无感，独立 profile，不影响平时浏览器）；
+   *  3) 拉起失败/找不到浏览器可执行文件 → 保持默认隔离模式（不打扰）。
    */
   async tryConnectExternal(): Promise<void> {
     if (this.context) return;
-    const url = this.opts.cdpUrl ?? (await this.probeExternal());
+    let url = this.opts.cdpUrl ?? (await this.probeExternal());
+    if (!url && !this.opts.noAutoLaunch) {
+      const launched = await this.launchExternalBrowser();
+      if (launched) {
+        // 轮询等待 CDP 就绪（最长 ~12s；浏览器冷启动）
+        for (let i = 0; i < 24; i++) {
+          url = await this.probeExternal();
+          if (url) break;
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+    }
     if (!url) return;
     this.autoCdpUrl = url;
     await this.ensure();
+    await this.refreshExternalTarget();
+  }
+
+  /** 自动拉起带调试端口的浏览器（独立 profile + GUI 自动开面板） */
+  private async launchExternalBrowser(): Promise<boolean> {
+    try {
+      const { spawn } = await import("node:child_process");
+      const { tmpdir } = await import("node:os");
+      const gui = this.opts.guiUrl ?? "http://127.0.0.1:3080";
+      const candidates = [
+        `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env["ProgramFiles(x86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env["ProgramFiles(x86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        `${process.env.ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      ];
+      const exe = candidates.find((p) => {
+        try {
+          return p && require("node:fs").existsSync(p);
+        } catch {
+          return false;
+        }
+      });
+      if (!exe) return false;
+      const profile = join(tmpdir(), "dsh-browser-external");
+      const p = spawn(
+        exe,
+        ["--remote-debugging-port=9222", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", `${gui}?dsh-browser=open`],
+        { detached: true, stdio: "ignore" },
+      );
+      p.unref();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 外部模式：重新扫描目标帧（面板 #live-frame）并给共享视图帧打「本窗口」标记。
+   * 每次 /api/state 都会调用——新窗口的面板是异步出现的，需持续补齐。
+   */
+  async refreshExternalTarget(): Promise<void> {
+    const tab = this.active();
+    if (!tab || !tab.external) return;
+    if (!tab.targetFrame) {
+      const live = tab.page
+        .frames()
+        .find((f) => {
+          const pf = f.parentFrame();
+          return pf !== null && pf.url().includes(":9333");
+        });
+      if (live) tab.targetFrame = live;
+    }
+    // 标记共享视图帧：只有被标记的窗口才显示外部模式原生视图
+    for (const f of tab.page.frames()) {
+      try {
+        if (f.url().includes(":9333")) await f.evaluate(() => { (window as unknown as Record<string, unknown>).__dshExternal = true; });
+      } catch {
+        /* 帧分离/跨域失败可忽略 */
+      }
+    }
+    await this.syncTabNav?.(tab);
   }
 
   onEvent(cb: (ev: ManagerEvent) => void): void {
@@ -416,18 +497,23 @@ export class BrowserManager {
       this.connectedBrowser = browser;
       const context = browser.contexts()[0] ?? (await browser.newContext());
       this.context = context as BrowserContext;
-      // 找到承载共享视图面板的页面（含 :9333 帧的标签页）
+      // 找到承载共享视图面板的页面（含 :9333 帧的标签页；也可能是独立打开的共享视图标签页）
       let guiPage: Page | null = null;
       for (const page of context.pages()) {
         const frames = page.frames();
-        if (frames.some((f) => f.url().includes(":9333"))) {
+        if (frames.some((f) => f.url().includes(":9333")) || page.url().includes(":9333")) {
           guiPage = page;
           break;
         }
       }
       if (!guiPage) {
+        // 面板可能尚未加载（新窗口还在打开中）：先认领第一个标签页，目标帧稍后补齐
+        const first = context.pages()[0];
+        if (first) guiPage = first;
+      }
+      if (!guiPage) {
         throw new Error(
-          `外部浏览器模式：在 ${externalUrl} 上找不到承载共享视图（:9333）的标签页。` +
+          `外部浏览器模式：在 ${externalUrl} 上没有可用的标签页。` +
             "请用 --remote-debugging-port 启动浏览器后打开 DSH GUI（共享视图面板会自动出现），再重试。",
         );
       }
@@ -674,6 +760,8 @@ export class BrowserManager {
     // 外部模式：导航目标帧（面板 iframe），页面在面板中原生渲染
     if (tab.targetFrame) {
       await tab.targetFrame.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    } else if (tab.external) {
+      throw new Error("外部浏览器模式：共享面板尚未就绪（正在等待外部浏览器窗口打开面板），请稍后重试。");
     } else {
       await tab.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     }
