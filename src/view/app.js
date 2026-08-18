@@ -140,6 +140,15 @@ async function refreshState() {
     state.external = !!data.external;
     applyExternalMode();
   }
+  if (data.externalError) {
+    let badge = document.getElementById("external-badge");
+    if (!badge) {
+      badge = document.createElement("div");
+      badge.id = "external-badge";
+      $("#toolbar").appendChild(badge);
+    }
+    badge.textContent = "外部模式连接失败：" + data.externalError;
+  }
   renderTabs();
   renderAddress();
   renderDevBadge();

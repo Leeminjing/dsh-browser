@@ -227,6 +227,10 @@ export class BrowserManager {
   get external(): boolean {
     return !!this.opts.cdpUrl && this.tabs.size > 0 && this.active()?.external === true;
   }
+  /** 外部模式已配置但尚未连接（视图打开时触发 ensure） */
+  get externalPending(): boolean {
+    return !!this.opts.cdpUrl && !this.context;
+  }
 
   onEvent(cb: (ev: ManagerEvent) => void): void {
     this.listeners.push(cb);

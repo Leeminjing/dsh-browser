@@ -161,6 +161,8 @@ export declare class BrowserManager {
     constructor(opts: BrowserManagerOptions);
     /** 是否外部浏览器模式：直接驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
     get external(): boolean;
+    /** 外部模式已配置但尚未连接（视图打开时触发 ensure） */
+    get externalPending(): boolean;
     onEvent(cb: (ev: ManagerEvent) => void): void;
     private emit;
     /** 记录当前由哪个会话发起浏览器操作（exec.agent.id）。 */
