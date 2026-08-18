@@ -214,6 +214,7 @@ export class ViewServer {
       if (p === "/api/state" && method === "GET") {
         return this.sendJson(res, 200, {
           state: await manager.state(),
+          external: manager.external,
           devMode: stores.getDevMode(),
           sites: stores.listSitePermissions(),
           annotations: stores.listAnnotations(),

@@ -7,7 +7,7 @@
 //   - Developer Mode：CDPSession 深度调试（console/network/performance，spec #12）
 // ============================================================================
 
-import type { BrowserContext, CDPSession, Page } from "playwright";
+import type { BrowserContext, CDPSession, Frame, Page } from "playwright";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Annotation, BrowserStores } from "./stores.js";
@@ -96,6 +96,10 @@ interface Tab {
   canGoBackCache: boolean;
   /** 前进栈（goBack 后记录的 URL；playwright 1.62 已移除 canGoForward） */
   fwdStack: string[];
+  /** 外部浏览器模式（路线 C）：Agent 直接驱动面板内 iframe 的目标帧 */
+  targetFrame?: Frame;
+  /** 是否外部浏览器模式（无 Playwright 隔离 profile，直接操作用户浏览器） */
+  external: boolean;
   cdp?: CDPSession;
   cdpEnabled: boolean;
   cdpBuffers: { consoleLogs: ConsoleLogEntry[]; network: NetworkRequestEntry[] };
@@ -110,6 +114,9 @@ export interface BrowserManagerOptions {
   shotsDir: string;
   viewport?: { width: number; height: number };
   headless?: boolean;
+  /** 外部浏览器模式（路线 C）：设为用户浏览器 CDP 地址（如 http://127.0.0.1:9222）。
+   *  直接连接用户浏览器并驱动共享视图面板内的目标 iframe——原生渲染、实时同步，无隔离。 */
+  cdpUrl?: string;
   onEvent?: (ev: ManagerEvent) => void;
 }
 
@@ -209,8 +216,17 @@ export class BrowserManager {
   private streamFrameListeners: Array<(frame: ScreencastFrame) => void> = [];
   /** 当前视口尺寸（共享面板自适应；新标签页沿用同一尺寸） */
   private viewportSize: { width: number; height: number } = { width: 1280, height: 800 };
+  /** 外部浏览器模式的 CDP 连接（connectOverCDP；dispose 时仅断开，不关闭用户浏览器） */
+  private connectedBrowser: import("playwright").Browser | null = null;
+  /** 外部模式：目标帧变化后刷新标签状态（adoptPage 内挂载） */
+  private syncTabNav: ((t: Tab) => Promise<void>) | null = null;
 
   constructor(private opts: BrowserManagerOptions) {}
+
+  /** 是否外部浏览器模式：直接驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
+  get external(): boolean {
+    return !!this.opts.cdpUrl && this.tabs.size > 0 && this.active()?.external === true;
+  }
 
   onEvent(cb: (ev: ManagerEvent) => void): void {
     this.listeners.push(cb);
@@ -245,6 +261,8 @@ export class BrowserManager {
 
   /** 开始对指定标签页做 CDP screencast 实时帧流（无 DevMode 依赖） */
   async startScreencast(tabId?: string): Promise<void> {
+    // 外部模式：面板 iframe 本身就是实时原生视图，无需截图帧流
+    if (this.opts.cdpUrl) return;
     await this.ensure();
     const tab = this.tabs.get(tabId ?? "") ?? this.active();
     if (!tab) throw new Error("没有打开的浏览器标签页");
@@ -318,6 +336,8 @@ export class BrowserManager {
 
   /** 共享面板自适应：调整当前标签页视口尺寸 → 页面响应式重排，帧流 1:1 铺满面板 */
   async resizeViewport(width: number, height: number): Promise<void> {
+    // 外部模式：视口由用户浏览器自身决定，无需（也不能）调整
+    if (this.opts.cdpUrl) return;
     // 浏览器尚未启动时不做任何事（保留占位页；首个标签页打开后会随面板尺寸调整）
     if (!this.context) return;
     const tab = this.active();
@@ -339,7 +359,12 @@ export class BrowserManager {
   async mouseMove(tabId: string, x: number, y: number): Promise<void> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) return;
-    await t.page.mouse.move(x, y);
+    if (t.targetFrame) {
+      const off = await this.frameOffset(t.targetFrame);
+      await t.page.mouse.move(off.x + x, off.y + y);
+    } else {
+      await t.page.mouse.move(x, y);
+    }
   }
 
   async ensure(): Promise<void> {
@@ -353,6 +378,43 @@ export class BrowserManager {
         "内置浏览器依赖 playwright 未安装。请在 profile 中运行 `pnpm add playwright && pnpm exec playwright install chromium` 后重启。",
       );
     }
+
+    // ---- 外部浏览器模式（路线 C）：直接连接用户浏览器（--remote-debugging-port）----
+    if (this.opts.cdpUrl) {
+      const browser = await chromium.connectOverCDP(this.opts.cdpUrl);
+      this.connectedBrowser = browser;
+      const context = browser.contexts()[0] ?? (await browser.newContext());
+      this.context = context as BrowserContext;
+      // 找到承载共享视图面板的页面（含 :9333 帧的标签页）
+      let guiPage: Page | null = null;
+      for (const page of context.pages()) {
+        const frames = page.frames();
+        if (frames.some((f) => f.url().includes(":9333"))) {
+          guiPage = page;
+          break;
+        }
+      }
+      if (!guiPage) {
+        throw new Error(
+          `外部浏览器模式：在 ${this.opts.cdpUrl} 上找不到承载共享视图（:9333）的标签页。` +
+            "请用 --remote-debugging-port 启动浏览器后打开 DSH GUI（共享视图面板会自动出现），再重试。",
+        );
+      }
+      const tab = await this.adoptPage(guiPage);
+      tab.external = true;
+      // 目标帧 = 面板 #live-frame（:9333 页面的 iframe 子帧）
+      const live = guiPage
+        .frames()
+        .find((f) => {
+          const pf = f.parentFrame();
+          return pf !== null && pf.url().includes(":9333");
+        });
+      if (live) tab.targetFrame = live;
+      await this.syncTabNav?.(tab);
+      this.pushState();
+      return;
+    }
+
     const context = await chromium.launchPersistentContext(this.opts.profileDir, {
       headless: this.opts.headless ?? true,
       viewport: this.opts.viewport ?? { width: 1280, height: 800 },
@@ -377,6 +439,7 @@ export class BrowserManager {
       loading: false,
       canGoBackCache: false,
       fwdStack: [],
+      external: false,
       cdpEnabled: false,
       cdpBuffers: { consoleLogs: [], network: [] },
       pendingRequests: new Map(),
@@ -385,17 +448,38 @@ export class BrowserManager {
     this.activeId = tab.id;
 
     const syncNavState = async () => {
-      tab.url = await page.url();
-      tab.title = (await page.title()) || tab.title;
+      // 外部模式：url/title 来自目标帧（面板 iframe），而非 GUI 页面本身
+      if (tab.targetFrame) {
+        try {
+          tab.url = await tab.targetFrame.url();
+          tab.title = (await tab.targetFrame.title()) || tab.title;
+        } catch {
+          /* 帧已分离 */
+        }
+      } else {
+        tab.url = await page.url();
+        tab.title = (await page.title()) || tab.title;
+      }
       try {
-        tab.canGoBackCache = (await page.evaluate(() => window.history.length > 1)) as boolean;
+        const hist = tab.targetFrame
+          ? ((await tab.targetFrame.evaluate(() => window.history.length > 1)) as boolean)
+          : ((await page.evaluate(() => window.history.length > 1)) as boolean);
+        tab.canGoBackCache = hist;
       } catch {
         tab.canGoBackCache = false;
       }
     };
 
+    /** 外部模式：目标帧变化后刷新标签状态（导航 / 重新挂载） */
+    this.syncTabNav = async (t: Tab) => {
+      await syncNavState();
+      this.pushState();
+    };
+
     page.on("framenavigated", (frame) => {
-      if (frame !== page.mainFrame()) return;
+      // 外部模式：只响应目标帧（面板 iframe）的导航；普通模式：只响应主页面导航
+      if (!tab.external && frame !== page.mainFrame()) return;
+      if (tab.external && (!tab.targetFrame || frame !== tab.targetFrame)) return;
       void (async () => {
         await syncNavState();
         this.opts.stores.recordHistory(tab.url, tab.title);
@@ -488,6 +572,9 @@ export class BrowserManager {
 
   // ---- 标签页 ----
   async newTab(url?: string): Promise<string> {
+    if (this.opts.cdpUrl) {
+      throw new Error("外部浏览器模式（路线 C）：Agent 只驱动共享面板内的目标页面，不支持开新标签页。");
+    }
     await this.ensure();
     const page = await this.context!.newPage();
     await page.setViewportSize(this.viewportSize).catch(() => {});
@@ -497,6 +584,7 @@ export class BrowserManager {
     return tab.id;
   }
   async closeTab(tabId: string): Promise<void> {
+    if (this.opts.cdpUrl) throw new Error("外部浏览器模式：不支持关闭用户浏览器标签页。");
     const tab = this.tabs.get(tabId);
     if (tab) {
       await tab.page.close().catch(() => {});
@@ -521,23 +609,54 @@ export class BrowserManager {
     return this.tabs.get(tabId);
   }
 
+  // ---- 外部模式（路线 C）：目标帧坐标映射 ----
+  /** 目标帧在当前顶层页面视口内的偏移（沿 frameElement 链逐级相加） */
+  private async frameOffset(frame: Frame): Promise<{ x: number; y: number }> {
+    let x = 0;
+    let y = 0;
+    let f: Frame | null = frame;
+    while (f) {
+      const r = await f.evaluate(() => {
+        const fe = window.frameElement;
+        if (!fe) return null;
+        const rect = fe.getBoundingClientRect();
+        return { x: rect.x, y: rect.y };
+      }).catch(() => null);
+      if (!r) break;
+      x += r.x;
+      y += r.y;
+      f = f.parentFrame();
+    }
+    return { x, y };
+  }
+
+  /** 工具执行目标：外部模式 → 目标帧；普通模式 → 主页面 */
+  private target(tab: Tab): Frame | Page {
+    return tab.targetFrame ?? tab.page;
+  }
+
   // ---- 导航 ----
   async navigateTo(tabId: string, url: string): Promise<{ url: string; title: string; httpStatus: number | null; verified: boolean }> {
     const tab = this.tabs.get(tabId) ?? this.active() ?? (await this.ensureTab());
     await this.ensure();
-    const page = tab.page;
     tab.loading = true;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    // 外部模式：导航目标帧（面板 iframe），页面在面板中原生渲染
+    if (tab.targetFrame) {
+      await tab.targetFrame.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    } else {
+      await tab.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    }
     let httpStatus: number | null = null;
+    const currentUrl = tab.targetFrame ? tab.targetFrame.url() : await tab.page.url();
     if (/^https?:/i.test(url)) {
       try {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 10_000);
         let res: Response;
         try {
-          res = await fetch(await page.url(), { method: "HEAD", redirect: "follow", signal: ctrl.signal });
+          res = await fetch(currentUrl, { method: "HEAD", redirect: "follow", signal: ctrl.signal });
         } catch {
-          res = await fetch(await page.url(), { method: "GET", redirect: "follow", signal: ctrl.signal });
+          res = await fetch(currentUrl, { method: "GET", redirect: "follow", signal: ctrl.signal });
         }
         clearTimeout(timer);
         httpStatus = res.status;
@@ -545,8 +664,8 @@ export class BrowserManager {
         httpStatus = null;
       }
     }
-    tab.url = await page.url();
-    tab.title = (await page.title()) || tab.title;
+    tab.url = currentUrl;
+    tab.title = (tab.targetFrame ? await tab.targetFrame.title().catch(() => "") : await tab.page.title()) || tab.title;
     tab.loading = false;
     tab.fwdStack = [];
     this.opts.stores.recordHistory(tab.url, tab.title);
@@ -610,14 +729,30 @@ export class BrowserManager {
   }
   reload(tabId: string): void {
     const t = this.tabs.get(tabId) ?? this.active();
-    if (t) void t.page.reload({ waitUntil: "domcontentloaded" });
+    if (!t) return;
+    // 外部模式：刷新目标帧（面板 iframe）
+    void (async () => {
+      try {
+        if (t.targetFrame) {
+          // Frame 无 reload API：同 URL 重新 goto 即刷新
+          const cur = t.targetFrame.url();
+          if (cur && cur !== "about:blank") await t.targetFrame.goto(cur, { waitUntil: "domcontentloaded" });
+          else await t.targetFrame.evaluate(() => location.reload()).catch(() => {});
+        } else {
+          await t.page.reload({ waitUntil: "domcontentloaded" });
+        }
+      } catch {
+        /* ignore */
+      }
+      this.pushState();
+    })();
   }
 
   // ---- 页面操作 ----
   async findElement(tabId: string, query: string): Promise<PageElement | null> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) throw new Error("没有打开的浏览器标签页");
-    return (await t.page.evaluate(FIND_ELEMENT_SCRIPT(query))) as PageElement | null;
+    return (await this.target(t).evaluate(FIND_ELEMENT_SCRIPT(query))) as PageElement | null;
   }
 
   async click(tabId: string, query: string): Promise<PageElement> {
@@ -626,7 +761,13 @@ export class BrowserManager {
     const el = await this.findElement(tabId, query);
     if (!el) throw new Error(`页面上找不到可点击元素: ${query}`);
     if (el.disabled) throw new Error(`元素「${query}」当前处于禁用状态`);
-    await t.page.mouse.click(el.x + el.w / 2, el.y + el.h / 2);
+    // 外部模式：元素坐标是帧内局部坐标，需映射到顶层页面视口坐标
+    if (t.targetFrame) {
+      const off = await this.frameOffset(t.targetFrame);
+      await t.page.mouse.click(off.x + el.x + el.w / 2, off.y + el.y + el.h / 2);
+    } else {
+      await t.page.mouse.click(el.x + el.w / 2, el.y + el.h / 2);
+    }
     // 视图同步：点击可能改变页面内容/触发导航，发 state 让共享视图刷新（视图页忽略 shot 事件，故不能用 pushShot）
     this.pushState();
     return el;
@@ -636,13 +777,19 @@ export class BrowserManager {
   async clickAt(tabId: string, x: number, y: number): Promise<void> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) throw new Error("没有打开的浏览器标签页");
-    await t.page.mouse.click(x, y);
+    if (t.targetFrame) {
+      const off = await this.frameOffset(t.targetFrame);
+      await t.page.mouse.click(off.x + x, off.y + y);
+    } else {
+      await t.page.mouse.click(x, y);
+    }
     this.pushShot(tabId);
   }
 
   async type(tabId: string, query: string, text: string): Promise<PageElement> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) throw new Error("没有打开的浏览器标签页");
+    const target = this.target(t);
     let el: PageElement | null = null;
     if (query !== "*") {
       el = await this.findElement(tabId, query);
@@ -651,11 +798,11 @@ export class BrowserManager {
       if (el.type === "file") {
         throw new Error("网页要求上传文件，但内置浏览器不能自动完成文件上传（spec #8）。");
       }
-      await t.page.evaluate(FOCUS_INPUT_SCRIPT(query));
+      await target.evaluate(FOCUS_INPUT_SCRIPT(query));
     } else {
       // * → 优先输入到「当前已聚焦」的可见输入框（用户点击哪个字段就输入到哪）；
       // 否则聚焦第一个可见输入框（跳过隐藏元素，如登录页残留输入框）
-      await t.page.evaluate(
+      await target.evaluate(
         `(() => {
           const ae = document.activeElement;
           const isField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
@@ -670,7 +817,8 @@ export class BrowserManager {
         })()`,
       );
     }
-    // 瞬时注入文本（不经逐字键盘事件，减少输入延迟；触发 input 事件，兼容受控表单）
+    // 瞬时注入文本（不经逐字键盘事件，减少输入延迟；触发 input 事件，兼容受控表单）。
+    // 焦点已落在目标帧内，page.keyboard 的 CDP Input 事件会路由到聚焦的帧。
     await t.page.keyboard.insertText(text);
     // 视图同步：输入内容后刷新共享视图
     this.pushState();
@@ -688,17 +836,28 @@ export class BrowserManager {
   async snapshot(tabId: string): Promise<PageSnapshot> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) throw new Error("没有打开的浏览器标签页");
-    const data = (await t.page.evaluate(SNAPSHOT_SCRIPT)) as PageSnapshot;
+    const data = (await this.target(t).evaluate(SNAPSHOT_SCRIPT)) as PageSnapshot;
     return { ...data, at: Date.now() };
   }
 
   /** 截图并保存到 shots 目录，返回可访问 URL（spec #5/#13 验证与最终状态）。
-   *  silent 用于视图页自身的轮询刷新：不发 "shot" 事件，避免「截图→事件→再截图」死循环。 */
+   *  silent 用于视图页自身的轮询刷新：不发 "shot" 事件，避免「截图→事件→再截图」死循环。
+   *  外部模式：截取目标帧所在区域（clip = 帧在顶层页面视口内的位置与尺寸）。 */
   async screenshot(tabId: string, opts?: { silent?: boolean }): Promise<{ file: string; url: string; ts: number }> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) throw new Error("没有打开的浏览器标签页");
     const ts = Date.now();
-    const buffer = await t.page.screenshot({ type: "png" });
+    let buffer: Buffer;
+    if (t.targetFrame) {
+      const off = await this.frameOffset(t.targetFrame);
+      const box = (await t.targetFrame.evaluate(() => {
+        const de = document.documentElement;
+        return { w: de.clientWidth, h: de.clientHeight };
+      })) as { w: number; h: number };
+      buffer = await t.page.screenshot({ type: "png", clip: { x: off.x, y: off.y, width: box.w, height: box.h } });
+    } else {
+      buffer = await t.page.screenshot({ type: "png" });
+    }
     mkdirSync(this.opts.shotsDir, { recursive: true });
     const file = join(this.opts.shotsDir, `shot_${ts}.png`);
     writeFileSync(file, buffer);
@@ -733,9 +892,9 @@ export class BrowserManager {
     if (!t) throw new Error("没有打开的浏览器标签页");
     if (on) {
       const anns = this.opts.stores.listAnnotations(t.url);
-      await t.page.evaluate(buildOverlayScript(anns));
+      await this.target(t).evaluate(buildOverlayScript(anns));
     } else {
-      await t.page.evaluate(buildOverlayExitScript());
+      await this.target(t).evaluate(buildOverlayExitScript());
     }
   }
 
@@ -847,7 +1006,7 @@ export class BrowserManager {
   async evaluate(tabId: string, expression: string): Promise<unknown> {
     const t = this.tabs.get(tabId) ?? this.active();
     if (!t) throw new Error("没有打开的浏览器标签页");
-    const result = await t.page.evaluate(`(async () => { return ${expression} })()`);
+    const result = await this.target(t).evaluate(`(async () => { return ${expression} })()`);
     // 视图同步：JS 可能修改 DOM / 触发导航
     this.pushState();
     return result;
@@ -855,6 +1014,19 @@ export class BrowserManager {
 
   async dispose(): Promise<void> {
     await this.stopScreencast().catch(() => {});
+    if (this.opts.cdpUrl) {
+      // 外部模式：只断开 CDP 连接，绝不动用户浏览器（context.close 会关掉用户所有标签页）
+      try {
+        await this.connectedBrowser?.close();
+      } catch {
+        /* ignore */
+      }
+      this.connectedBrowser = null;
+      this.context = null;
+      this.tabs.clear();
+      this.activeId = null;
+      return;
+    }
     try {
       await this.context?.close();
     } catch {

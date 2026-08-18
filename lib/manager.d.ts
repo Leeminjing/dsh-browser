@@ -1,4 +1,4 @@
-import type { CDPSession, Page } from "playwright";
+import type { CDPSession, Frame, Page } from "playwright";
 import type { Annotation, BrowserStores } from "./stores.js";
 export interface TabInfo {
     id: string;
@@ -101,6 +101,10 @@ interface Tab {
     canGoBackCache: boolean;
     /** 前进栈（goBack 后记录的 URL；playwright 1.62 已移除 canGoForward） */
     fwdStack: string[];
+    /** 外部浏览器模式（路线 C）：Agent 直接驱动面板内 iframe 的目标帧 */
+    targetFrame?: Frame;
+    /** 是否外部浏览器模式（无 Playwright 隔离 profile，直接操作用户浏览器） */
+    external: boolean;
     cdp?: CDPSession;
     cdpEnabled: boolean;
     cdpBuffers: {
@@ -130,6 +134,9 @@ export interface BrowserManagerOptions {
         height: number;
     };
     headless?: boolean;
+    /** 外部浏览器模式（路线 C）：设为用户浏览器 CDP 地址（如 http://127.0.0.1:9222）。
+     *  直接连接用户浏览器并驱动共享视图面板内的目标 iframe——原生渲染、实时同步，无隔离。 */
+    cdpUrl?: string;
     onEvent?: (ev: ManagerEvent) => void;
 }
 export declare class BrowserManager {
@@ -147,7 +154,13 @@ export declare class BrowserManager {
     private streamFrameListeners;
     /** 当前视口尺寸（共享面板自适应；新标签页沿用同一尺寸） */
     private viewportSize;
+    /** 外部浏览器模式的 CDP 连接（connectOverCDP；dispose 时仅断开，不关闭用户浏览器） */
+    private connectedBrowser;
+    /** 外部模式：目标帧变化后刷新标签状态（adoptPage 内挂载） */
+    private syncTabNav;
     constructor(opts: BrowserManagerOptions);
+    /** 是否外部浏览器模式：直接驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
+    get external(): boolean;
     onEvent(cb: (ev: ManagerEvent) => void): void;
     private emit;
     /** 记录当前由哪个会话发起浏览器操作（exec.agent.id）。 */
@@ -172,6 +185,10 @@ export declare class BrowserManager {
     setActive(tabId: string): void;
     active(): Tab | undefined;
     getTab(tabId: string): Tab | undefined;
+    /** 目标帧在当前顶层页面视口内的偏移（沿 frameElement 链逐级相加） */
+    private frameOffset;
+    /** 工具执行目标：外部模式 → 目标帧；普通模式 → 主页面 */
+    private target;
     navigateTo(tabId: string, url: string): Promise<{
         url: string;
         title: string;
@@ -190,7 +207,8 @@ export declare class BrowserManager {
     press(tabId: string, key: string): Promise<void>;
     snapshot(tabId: string): Promise<PageSnapshot>;
     /** 截图并保存到 shots 目录，返回可访问 URL（spec #5/#13 验证与最终状态）。
-     *  silent 用于视图页自身的轮询刷新：不发 "shot" 事件，避免「截图→事件→再截图」死循环。 */
+     *  silent 用于视图页自身的轮询刷新：不发 "shot" 事件，避免「截图→事件→再截图」死循环。
+     *  外部模式：截取目标帧所在区域（clip = 帧在顶层页面视口内的位置与尺寸）。 */
     screenshot(tabId: string, opts?: {
         silent?: boolean;
     }): Promise<{

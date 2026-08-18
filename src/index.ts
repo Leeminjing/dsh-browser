@@ -40,7 +40,14 @@ export function apply(ctx: Context): void {
   fs.mkdirSync(shotsDir, { recursive: true });
 
   const stores = new BrowserStores({ dshHome });
-  const manager = new BrowserManager({ stores, profileDir, shotsDir });
+  const manager = new BrowserManager({
+    stores,
+    profileDir,
+    shotsDir,
+    // 外部浏览器模式（路线 C）：设置后直接连接用户浏览器（--remote-debugging-port）并驱动面板内目标 iframe。
+    // 注意：此模式无隔离 profile（spec #3），Agent 操作的是你的真实浏览器，仅在明确需要原生实时视图时开启。
+    cdpUrl: process.env.DSH_BROWSER_CDP_URL || undefined,
+  });
 
   // 用户问答（GUI 问题卡片）：权限 / 风险 / 历史 / CDP 批准都走这里
   // 注意：必须把调用方 agent 传给 userQuestions.ask —— web 部署的宿主 provider
