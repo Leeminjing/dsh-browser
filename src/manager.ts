@@ -280,7 +280,8 @@ export class BrowserManager {
       const vp = this.viewportSize;
       await cdp.send("Page.startScreencast", {
         format: "jpeg",
-        quality: 70,
+        // quality 85：截图帧是 JPEG 有损编码，太低会让文字边缘发糊
+        quality: 85,
         maxWidth: Math.max(320, vp.width),
         maxHeight: Math.max(240, vp.height),
         everyNthFrame: 1,
