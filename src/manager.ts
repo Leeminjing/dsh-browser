@@ -207,6 +207,8 @@ export class BrowserManager {
   private streamCdp: CDPSession | null = null;
   private streamTabId: string | null = null;
   private streamFrameListeners: Array<(frame: ScreencastFrame) => void> = [];
+  /** 当前视口尺寸（共享面板自适应；新标签页沿用同一尺寸） */
+  private viewportSize: { width: number; height: number } = { width: 1280, height: 800 };
 
   constructor(private opts: BrowserManagerOptions) {}
 
@@ -274,11 +276,13 @@ export class BrowserManager {
     });
     try {
       await cdp.send("Page.enable");
+      // maxWidth/maxHeight 跟随当前视口：帧像素 = 视口 CSS 像素（1:1），面板铺满
+      const vp = this.viewportSize;
       await cdp.send("Page.startScreencast", {
         format: "jpeg",
         quality: 70,
-        maxWidth: 1280,
-        maxHeight: 800,
+        maxWidth: Math.max(320, vp.width),
+        maxHeight: Math.max(240, vp.height),
         everyNthFrame: 1,
       });
     } catch (err) {
@@ -309,6 +313,24 @@ export class BrowserManager {
         /* ignore */
       }
     }
+  }
+
+  /** 共享面板自适应：调整当前标签页视口尺寸 → 页面响应式重排，帧流 1:1 铺满面板 */
+  async resizeViewport(width: number, height: number): Promise<void> {
+    await this.ensure();
+    const tab = this.active();
+    if (!tab) return;
+    const w = Math.max(320, Math.min(4096, Math.round(width)));
+    const h = Math.max(240, Math.min(4096, Math.round(height)));
+    const cur = tab.page.viewportSize();
+    if (cur && Math.abs(cur.width - w) < 2 && Math.abs(cur.height - h) < 2) return;
+    this.viewportSize = { width: w, height: h };
+    await tab.page.setViewportSize({ width: w, height: h });
+    // 帧流尺寸跟随新视口（重启 screencast，maxWidth/maxHeight 取新尺寸）
+    if (this.streamCdp && this.streamTabId === tab.id) {
+      await this.startScreencast(tab.id).catch(() => {});
+    }
+    this.pushState();
   }
 
   /** 只注入鼠标移动（hover 反馈）；坐标按视口 CSS 像素 */
@@ -466,6 +488,7 @@ export class BrowserManager {
   async newTab(url?: string): Promise<string> {
     await this.ensure();
     const page = await this.context!.newPage();
+    await page.setViewportSize(this.viewportSize).catch(() => {});
     const tab = await this.adoptPage(page);
     if (url) await this.navigateTo(tab.id, url);
     if (this.streamCdp) void this.startScreencast(tab.id);
@@ -540,6 +563,7 @@ export class BrowserManager {
     const existing = this.active();
     if (existing) return existing;
     const page = await this.context!.newPage();
+    await page.setViewportSize(this.viewportSize).catch(() => {});
     return this.adoptPage(page);
   }
 

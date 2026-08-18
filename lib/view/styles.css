@@ -29,6 +29,10 @@ html, body {
   font-family: var(--font); font-size: 14px;
   color: var(--text); background: var(--bg);
 }
+body {
+  /* 纵向 flex：toolbar 固定高，stage-wrap 占满剩余空间 */
+  display: flex; flex-direction: column;
+}
 
 /* ---- 顶部工具栏 ---- */
 #toolbar {
@@ -81,17 +85,18 @@ html, body {
 
 /* ---- 页面舞台 ---- */
 #stage-wrap {
-  flex: 1; overflow: hidden; position: relative;
+  /* min-height: 0 让 flex 容器收缩到可见区域（否则舞台布局高度会把容器撑高，出现空白） */
+  flex: 1; overflow: hidden; position: relative; min-height: 0;
   background-color: var(--bg);
   background-image: radial-gradient(rgba(28, 36, 51, .06) 1px, transparent 1px);
   background-size: 18px 18px;
 }
 #stage {
-  position: relative; width: 1280px; min-height: 800px;
-  margin: 0 auto; background: #fff;
-  box-shadow: var(--shadow-md); border-radius: 12px; overflow: hidden;
+  position: relative; width: 1280px; height: 800px;
+  background: #fff;
+  box-shadow: var(--shadow-md); border-radius: 8px; overflow: hidden;
 }
-#shot { display: block; width: 1280px; height: 800px; user-select: none; }
+#shot { display: block; width: 100%; height: 100%; user-select: none; }
 #annotations-layer { position: absolute; inset: 0; pointer-events: none; }
 .ann-pin {
   position: absolute; border: 2px solid #38a4f8; background: rgba(56, 164, 248, .16);
@@ -123,7 +128,7 @@ html, body {
 #placeholder p { font-size: 15px; font-weight: 600; color: var(--text); }
 #placeholder .hint { font-size: 12.5px; font-weight: 400; max-width: 440px; line-height: 1.8; color: var(--text-3); }
 
-#live-frame { position: absolute; inset: 0; width: 1280px; height: 800px; border: 0; display: none; }
+#live-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: none; }
 #stage.iframe #shot, #stage.iframe #annotations-layer { display: none; }
 #stage.iframe #live-frame { display: block; }
 

@@ -145,6 +145,8 @@ export declare class BrowserManager {
     private streamCdp;
     private streamTabId;
     private streamFrameListeners;
+    /** 当前视口尺寸（共享面板自适应；新标签页沿用同一尺寸） */
+    private viewportSize;
     constructor(opts: BrowserManagerOptions);
     onEvent(cb: (ev: ManagerEvent) => void): void;
     private emit;
@@ -156,6 +158,8 @@ export declare class BrowserManager {
     /** 开始对指定标签页做 CDP screencast 实时帧流（无 DevMode 依赖） */
     startScreencast(tabId?: string): Promise<void>;
     stopScreencast(): Promise<void>;
+    /** 共享面板自适应：调整当前标签页视口尺寸 → 页面响应式重排，帧流 1:1 铺满面板 */
+    resizeViewport(width: number, height: number): Promise<void>;
     /** 只注入鼠标移动（hover 反馈）；坐标按视口 CSS 像素 */
     mouseMove(tabId: string, x: number, y: number): Promise<void>;
     ensure(): Promise<void>;
