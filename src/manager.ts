@@ -282,6 +282,7 @@ export class BrowserManager {
   private async launchExternalBrowser(): Promise<boolean> {
     try {
       const { spawn } = await import("node:child_process");
+      const { existsSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
       const gui = this.opts.guiUrl ?? "http://127.0.0.1:3080";
       const candidates = [
@@ -291,13 +292,7 @@ export class BrowserManager {
         `${process.env["ProgramFiles(x86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`,
         `${process.env.ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
       ];
-      const exe = candidates.find((p) => {
-        try {
-          return p && require("node:fs").existsSync(p);
-        } catch {
-          return false;
-        }
-      });
+      const exe = candidates.find((p) => !!p && existsSync(p));
       if (!exe) return false;
       const profile = join(tmpdir(), "dsh-browser-external");
       const p = spawn(
