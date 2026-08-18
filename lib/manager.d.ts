@@ -137,12 +137,8 @@ export interface BrowserManagerOptions {
     /** 外部浏览器模式（路线 C）：设为用户浏览器 CDP 地址（如 http://127.0.0.1:9222）。
      *  直接连接用户浏览器并驱动共享视图面板内的目标 iframe——原生渲染、实时同步，无隔离。 */
     cdpUrl?: string;
-    /** 自动拉起外部浏览器时打开的 GUI 地址（默认 http://127.0.0.1:3080） */
-    guiUrl?: string;
     /** 共享视图基础地址（标记/识别帧用） */
     viewBase?: string;
-    /** 禁止自动拉起外部浏览器（DSH_BROWSER_NO_AUTO_LAUNCH=1） */
-    noAutoLaunch?: boolean;
     onEvent?: (ev: ManagerEvent) => void;
 }
 export declare class BrowserManager {
@@ -174,14 +170,10 @@ export declare class BrowserManager {
     /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
     private probeExternal;
     /**
-     * 视图打开时调用：一键进入外部浏览器模式（路线 C）。
-     *  1) 已配置 DSH_BROWSER_CDP_URL 或探测到调试浏览器 → 直接连接；
-     *  2) 否则自动拉起一个带调试端口的浏览器窗口（用户无感，独立 profile，不影响平时浏览器）；
-     *  3) 拉起失败/找不到浏览器可执行文件 → 保持默认隔离模式（不打扰）。
+     * 视图打开时调用：若配置了 DSH_BROWSER_CDP_URL 或探测到带调试端口的浏览器，
+     * 则进入外部浏览器模式（原生实时视图）；否则什么都不做（保持内置隔离模式，绝不弹窗）。
      */
     tryConnectExternal(): Promise<void>;
-    /** 自动拉起带调试端口的浏览器（独立 profile + GUI 自动开面板） */
-    private launchExternalBrowser;
     /**
      * 外部模式：重新扫描目标帧（面板 #live-frame）并给共享视图帧打「本窗口」标记。
      * 每次 /api/state 都会调用——新窗口的面板是异步出现的，需持续补齐。

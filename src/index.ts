@@ -44,13 +44,11 @@ export function apply(ctx: Context): void {
     stores,
     profileDir,
     shotsDir,
-    // 外部浏览器模式（路线 C）：设置后直接连接用户浏览器（--remote-debugging-port）并驱动面板内目标 iframe。
-    // 未设置时也会在视图打开时自动探测/自动拉起调试浏览器（一键进入原生实时视图）。
+    // 外部浏览器模式（路线 C，可选）：设置后直接连接用户浏览器（--remote-debugging-port）并驱动面板内目标 iframe。
+    // 未设置时仅自动探测本机调试端口；探测不到就保持默认「内置隔离浏览器」模式（绝不弹窗）。
     // 注意：外部模式无隔离 profile（spec #3），Agent 操作的是你的真实浏览器。
     cdpUrl: process.env.DSH_BROWSER_CDP_URL || undefined,
-    guiUrl: process.env.DSH_BROWSER_GUI_URL || "http://127.0.0.1:3080",
     viewBase: `http://127.0.0.1:${DEFAULT_VIEW_PORT}`,
-    noAutoLaunch: process.env.DSH_BROWSER_NO_AUTO_LAUNCH === "1",
   });
 
   // 用户问答（GUI 问题卡片）：权限 / 风险 / 历史 / CDP 批准都走这里

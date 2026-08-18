@@ -117,12 +117,8 @@ export interface BrowserManagerOptions {
   /** 外部浏览器模式（路线 C）：设为用户浏览器 CDP 地址（如 http://127.0.0.1:9222）。
    *  直接连接用户浏览器并驱动共享视图面板内的目标 iframe——原生渲染、实时同步，无隔离。 */
   cdpUrl?: string;
-  /** 自动拉起外部浏览器时打开的 GUI 地址（默认 http://127.0.0.1:3080） */
-  guiUrl?: string;
   /** 共享视图基础地址（标记/识别帧用） */
   viewBase?: string;
-  /** 禁止自动拉起外部浏览器（DSH_BROWSER_NO_AUTO_LAUNCH=1） */
-  noAutoLaunch?: boolean;
   onEvent?: (ev: ManagerEvent) => void;
 }
 
@@ -258,58 +254,16 @@ export class BrowserManager {
   }
 
   /**
-   * 视图打开时调用：一键进入外部浏览器模式（路线 C）。
-   *  1) 已配置 DSH_BROWSER_CDP_URL 或探测到调试浏览器 → 直接连接；
-   *  2) 否则自动拉起一个带调试端口的浏览器窗口（用户无感，独立 profile，不影响平时浏览器）；
-   *  3) 拉起失败/找不到浏览器可执行文件 → 保持默认隔离模式（不打扰）。
+   * 视图打开时调用：若配置了 DSH_BROWSER_CDP_URL 或探测到带调试端口的浏览器，
+   * 则进入外部浏览器模式（原生实时视图）；否则什么都不做（保持内置隔离模式，绝不弹窗）。
    */
   async tryConnectExternal(): Promise<void> {
     if (this.context) return;
-    let url = this.opts.cdpUrl ?? (await this.probeExternal());
-    if (!url && !this.opts.noAutoLaunch) {
-      const launched = await this.launchExternalBrowser();
-      if (launched) {
-        // 轮询等待 CDP 就绪（最长 ~12s；浏览器冷启动）
-        for (let i = 0; i < 24; i++) {
-          url = await this.probeExternal();
-          if (url) break;
-          await new Promise((r) => setTimeout(r, 500));
-        }
-      }
-    }
+    const url = this.opts.cdpUrl ?? (await this.probeExternal());
     if (!url) return;
     this.autoCdpUrl = url;
     await this.ensure();
     await this.refreshExternalTarget();
-  }
-
-  /** 自动拉起带调试端口的浏览器（独立 profile + GUI 自动开面板） */
-  private async launchExternalBrowser(): Promise<boolean> {
-    try {
-      const { spawn } = await import("node:child_process");
-      const { existsSync } = await import("node:fs");
-      const { tmpdir } = await import("node:os");
-      const gui = this.opts.guiUrl ?? "http://127.0.0.1:3080";
-      const candidates = [
-        `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`,
-        `${process.env["ProgramFiles(x86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
-        `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-        `${process.env["ProgramFiles(x86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`,
-        `${process.env.ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
-      ];
-      const exe = candidates.find((p) => !!p && existsSync(p));
-      if (!exe) return false;
-      const profile = join(tmpdir(), "dsh-browser-external");
-      const p = spawn(
-        exe,
-        ["--remote-debugging-port=9222", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", `${gui}?dsh-browser=open`],
-        { detached: true, stdio: "ignore" },
-      );
-      p.unref();
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   /**

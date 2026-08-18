@@ -100,16 +100,13 @@ dsh-browser/
 6. Click **Delete** on the demo task board → high-risk confirmation (spec #7).
 7. Turn on **DEV** in the view → ask the agent to **read console logs / network requests** → approve full CDP (spec #12).
 
-## 6. External browser mode (native real-time view)
+## 6. External browser mode (native real-time view, optional)
 
-The default shared view streams JPEG frames of the isolated built-in browser (works on any site, slight JPEG/scaling loss). For **pixel-perfect native rendering with real-time agent control** — like an embedded browser (Trae/Codex) — just **click the 🌐 browser button**: the plugin automatically launches a dedicated browser window (own profile, debug port `9222`), connects to it over CDP, and the agent drives the live iframe in that window's shared view.
+The **default** shared view is the built-in isolated browser shown **inside the GUI panel** (streams JPEG frames, works on any site, adaptive viewport + quality 85 for a sharp 1:1 picture). Click **🌐 浏览器** and that's it — no pop-ups, no setup.
 
-**One click. Nothing else.** The old window shows a hint pointing to the new window. If a debug-port browser is already running, it is reused directly.
+For **pixel-perfect native rendering** (like an embedded browser in Trae/Codex) there is an optional **external mode**: the agent drives the live iframe inside the shared-view panel through CDP on a browser that exposes a debug port. Enable it by launching **your own browser** with `--remote-debugging-port=9222` (e.g. `chrome.exe --remote-debugging-port=9222`) and opening the DSH GUI there; the plugin auto-detects the port (`9222/9223/9224`) or honors `$env:DSH_BROWSER_CDP_URL`. When active, the panel shows the native iframe and a badge warns **外部浏览器模式 · 直连你的浏览器（无隔离）**; other windows show a hint banner.
 
-- Auto-detection ports: `9222/9223/9224`. Opt-out of auto-launch: `$env:DSH_BROWSER_NO_AUTO_LAUNCH = "1"`.
-- Manual: `start-external.cmd` / `start-external.ps1` launch the same window; optional `$env:DSH_BROWSER_CDP_URL` forces a specific endpoint.
-
-> ⚠️ External mode has **no isolation** (spec #3): the agent operates your real browser with your real sessions. It only activates when the debug-port window is running; the badge stays visible as a reminder. Tabs/back-forward UI are hidden — the agent drives only the panel target frame.
+> ⚠️ External mode has **no isolation** (spec #3): the agent operates your real browser with your real sessions. It only activates while the debug-port browser is running. Tabs/back-forward UI are hidden — the agent drives only the panel target frame.
 
 ## 7. Known limitations (POC)
 
