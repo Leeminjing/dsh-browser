@@ -23,11 +23,7 @@
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.65"/><path d="M13.2 2.6v3.2h-3.2"/></svg>
     </button>
     <input id="address" placeholder="输入网址，回车打开（用户操作，无需授权）" spellcheck="false" autocomplete="off" />
-    <span class="sep"></span>
-    <button class="tb" id="btn-annotate" title="标注模式：框选页面区域写评论">标注</button>
-    <button class="tb" id="btn-history" title="浏览历史">历史</button>
-    <button class="tb" id="btn-sites" title="站点权限">权限</button>
-    <button class="tb dev" id="btn-devmode" title="Developer Mode">DEV</button>
+    <button class="tb" id="btn-frame" title="切换到 iframe 模式（仅限允许嵌入的站点）">iframe 模式</button>
   </header>
 
   <div id="stage-wrap">
@@ -43,21 +39,6 @@
       <iframe id="live-frame" title="iframe 模式（部分站点允许嵌入）"></iframe>
     </div>
   </div>
-
-  <footer id="type-bar">
-    <span class="type-label">按键 / 文本</span>
-    <button class="key" data-key="Enter" title="回车">Enter</button>
-    <button class="key" data-key="Tab" title="Tab">Tab</button>
-    <button class="key" data-key="Escape" title="Esc">Esc</button>
-    <input id="type-input" placeholder="点击页面后可直接在键盘上打字；也可在此输入后按回车" />
-    <button class="send" id="btn-type">输入</button>
-    <span class="sep"></span>
-    <label class="upload" title="手动上传文件给网页">
-      上传文件
-      <input type="file" id="file-input" multiple />
-    </label>
-    <button class="tb" id="btn-frame" title="切换到 iframe 模式（仅限允许嵌入的站点）">iframe 模式</button>
-  </footer>
 
   <div id="modal-root"></div>
   <div id="toast-root"></div>
