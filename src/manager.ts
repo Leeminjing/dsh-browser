@@ -231,9 +231,14 @@ export class BrowserManager {
 
   constructor(private opts: BrowserManagerOptions) {}
 
-  /** 是否外部浏览器模式：直接驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
+  /** 是否外部浏览器模式（配置了 CDP 地址，或自动探测/自动拉起成功） */
+  private get isExternalMode(): boolean {
+    return !!this.opts.cdpUrl || !!this.autoCdpUrl;
+  }
+
+  /** 外部模式已实际连接并驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
   get external(): boolean {
-    return !!this.opts.cdpUrl && this.tabs.size > 0 && this.active()?.external === true;
+    return this.isExternalMode && this.tabs.size > 0 && this.active()?.external === true;
   }
 
   /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
@@ -368,7 +373,7 @@ export class BrowserManager {
   /** 开始对指定标签页做 CDP screencast 实时帧流（无 DevMode 依赖） */
   async startScreencast(tabId?: string): Promise<void> {
     // 外部模式：面板 iframe 本身就是实时原生视图，无需截图帧流
-    if (this.opts.cdpUrl) return;
+    if (this.isExternalMode) return;
     await this.ensure();
     const tab = this.tabs.get(tabId ?? "") ?? this.active();
     if (!tab) throw new Error("没有打开的浏览器标签页");
@@ -443,7 +448,7 @@ export class BrowserManager {
   /** 共享面板自适应：调整当前标签页视口尺寸 → 页面响应式重排，帧流 1:1 铺满面板 */
   async resizeViewport(width: number, height: number): Promise<void> {
     // 外部模式：视口由用户浏览器自身决定，无需（也不能）调整
-    if (this.opts.cdpUrl) return;
+    if (this.isExternalMode) return;
     // 浏览器尚未启动时不做任何事（保留占位页；首个标签页打开后会随面板尺寸调整）
     if (!this.context) return;
     const tab = this.active();
@@ -684,7 +689,7 @@ export class BrowserManager {
 
   // ---- 标签页 ----
   async newTab(url?: string): Promise<string> {
-    if (this.opts.cdpUrl) {
+    if (this.isExternalMode) {
       throw new Error("外部浏览器模式（路线 C）：Agent 只驱动共享面板内的目标页面，不支持开新标签页。");
     }
     await this.ensure();
@@ -696,7 +701,7 @@ export class BrowserManager {
     return tab.id;
   }
   async closeTab(tabId: string): Promise<void> {
-    if (this.opts.cdpUrl) throw new Error("外部浏览器模式：不支持关闭用户浏览器标签页。");
+    if (this.isExternalMode) throw new Error("外部浏览器模式：不支持关闭用户浏览器标签页。");
     const tab = this.tabs.get(tabId);
     if (tab) {
       await tab.page.close().catch(() => {});
@@ -1128,7 +1133,7 @@ export class BrowserManager {
 
   async dispose(): Promise<void> {
     await this.stopScreencast().catch(() => {});
-    if (this.opts.cdpUrl) {
+    if (this.isExternalMode) {
       // 外部模式：只断开 CDP 连接，绝不动用户浏览器（context.close 会关掉用户所有标签页）
       try {
         await this.connectedBrowser?.close();

@@ -167,7 +167,9 @@ export declare class BrowserManager {
     /** 自动探测到的外部浏览器 CDP 地址（start-external.ps1 启动的调试端口） */
     private autoCdpUrl;
     constructor(opts: BrowserManagerOptions);
-    /** 是否外部浏览器模式：直接驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
+    /** 是否外部浏览器模式（配置了 CDP 地址，或自动探测/自动拉起成功） */
+    private get isExternalMode();
+    /** 外部模式已实际连接并驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
     get external(): boolean;
     /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
     private probeExternal;
