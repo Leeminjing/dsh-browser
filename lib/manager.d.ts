@@ -158,11 +158,18 @@ export declare class BrowserManager {
     private connectedBrowser;
     /** 外部模式：目标帧变化后刷新标签状态（adoptPage 内挂载） */
     private syncTabNav;
+    /** 自动探测到的外部浏览器 CDP 地址（start-external.ps1 启动的调试端口） */
+    private autoCdpUrl;
     constructor(opts: BrowserManagerOptions);
     /** 是否外部浏览器模式：直接驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
     get external(): boolean;
-    /** 外部模式已配置但尚未连接（视图打开时触发 ensure） */
-    get externalPending(): boolean;
+    /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
+    private probeExternal;
+    /**
+     * 视图打开时调用：若配置了 DSH_BROWSER_CDP_URL 或探测到调试浏览器，则建立外部连接；
+     * 否则什么都不做（保持占位页）。探测失败/无调试浏览器时开销极小（连接拒绝即刻返回）。
+     */
+    tryConnectExternal(): Promise<void>;
     onEvent(cb: (ev: ManagerEvent) => void): void;
     private emit;
     /** 记录当前由哪个会话发起浏览器操作（exec.agent.id）。 */

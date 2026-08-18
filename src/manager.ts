@@ -220,6 +220,8 @@ export class BrowserManager {
   private connectedBrowser: import("playwright").Browser | null = null;
   /** 外部模式：目标帧变化后刷新标签状态（adoptPage 内挂载） */
   private syncTabNav: ((t: Tab) => Promise<void>) | null = null;
+  /** 自动探测到的外部浏览器 CDP 地址（start-external.ps1 启动的调试端口） */
+  private autoCdpUrl: string | null = null;
 
   constructor(private opts: BrowserManagerOptions) {}
 
@@ -227,9 +229,33 @@ export class BrowserManager {
   get external(): boolean {
     return !!this.opts.cdpUrl && this.tabs.size > 0 && this.active()?.external === true;
   }
-  /** 外部模式已配置但尚未连接（视图打开时触发 ensure） */
-  get externalPending(): boolean {
-    return !!this.opts.cdpUrl && !this.context;
+
+  /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
+  private async probeExternal(): Promise<string | null> {
+    for (const port of [9222, 9223, 9224]) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 800);
+        const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (res.ok) return `http://127.0.0.1:${port}`;
+      } catch {
+        /* 无响应，试下一个端口 */
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 视图打开时调用：若配置了 DSH_BROWSER_CDP_URL 或探测到调试浏览器，则建立外部连接；
+   * 否则什么都不做（保持占位页）。探测失败/无调试浏览器时开销极小（连接拒绝即刻返回）。
+   */
+  async tryConnectExternal(): Promise<void> {
+    if (this.context) return;
+    const url = this.opts.cdpUrl ?? (await this.probeExternal());
+    if (!url) return;
+    this.autoCdpUrl = url;
+    await this.ensure();
   }
 
   onEvent(cb: (ev: ManagerEvent) => void): void {
@@ -384,7 +410,8 @@ export class BrowserManager {
     }
 
     // ---- 外部浏览器模式（路线 C）：直接连接用户浏览器（--remote-debugging-port）----
-    if (this.opts.cdpUrl) {
+    const externalUrl = this.opts.cdpUrl ?? this.autoCdpUrl;
+    if (externalUrl) {
       const browser = await chromium.connectOverCDP(this.opts.cdpUrl);
       this.connectedBrowser = browser;
       const context = browser.contexts()[0] ?? (await browser.newContext());
@@ -400,7 +427,7 @@ export class BrowserManager {
       }
       if (!guiPage) {
         throw new Error(
-          `外部浏览器模式：在 ${this.opts.cdpUrl} 上找不到承载共享视图（:9333）的标签页。` +
+          `外部浏览器模式：在 ${externalUrl} 上找不到承载共享视图（:9333）的标签页。` +
             "请用 --remote-debugging-port 启动浏览器后打开 DSH GUI（共享视图面板会自动出现），再重试。",
         );
       }

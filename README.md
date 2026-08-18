@@ -100,9 +100,22 @@ dsh-browser/
 6. Click **Delete** on the demo task board → high-risk confirmation (spec #7).
 7. Turn on **DEV** in the view → ask the agent to **read console logs / network requests** → approve full CDP (spec #12).
 
-## 6. Known limitations (POC)
+## 6. External browser mode (native real-time view)
 
-- The shared view is screenshot + click-overlay based (works on any site); embeddable sites can switch to iframe mode.
+The default shared view streams JPEG frames of the isolated built-in browser (works on any site, slight JPEG/scaling loss). If you want **pixel-perfect native rendering with real-time agent control** — exactly like an embedded browser (Trae/Codex) — enable **external mode**: the agent drives the live iframe inside the shared-view panel through CDP on *your* browser.
+
+**One-click setup (2 steps):**
+
+1. Double-click [`start-external.cmd`](./start-external.cmd) (or run `.\start-external.ps1`) → launches a Chrome/Edge with a dedicated profile + debug port `9222` and opens the DSH GUI.
+2. Restart the harness (`dsh web`) and refresh the GUI → the panel shows an orange badge **外部浏览器模式 · 直连你的浏览器（无隔离）**.
+
+The plugin auto-detects the debug port (`9222/9223/9224`) — no environment variables needed. (Optional: `$env:DSH_BROWSER_CDP_URL = "http://127.0.0.1:9222"` forces a specific endpoint.)
+
+> ⚠️ External mode has **no isolation** (spec #3): the agent operates your real browser with your real sessions. It is only active while the debug-port browser is running; the badge stays visible as a reminder. Tabs/back-forward UI are hidden — the agent drives only the panel target frame.
+
+## 7. Known limitations (POC)
+
+- The default shared view is screenshot + click-overlay based (works on any site); embeddable sites can switch to iframe mode; external mode gives native quality at the cost of isolation.
 - Risk detection is heuristic (keywords + URL fragments).
 - The docked panel depends on the Harness client-plugin loader; if it is not loaded, open `http://127.0.0.1:9333/` directly.
 - The browser runs on the harness machine (localhost); remote deployments must expose the shared view / screenshots accordingly.
