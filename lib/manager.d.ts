@@ -186,8 +186,9 @@ export declare class BrowserManager {
      * 关掉当前浏览器（保留 profile）→ 带 --remote-debugging-port 重启并恢复所有窗口 →
      * 打开 GUI（?dsh-browser=open 自动展开面板）→ 插件探测端口并连接。
      * 只在用户从面板确认后调用（会暂时关闭其浏览器窗口）。
+     * @param uaHint 视图页的 navigator.userAgent，用于判定用户实际使用的浏览器（Chrome/Edge）
      */
-    relaunchBrowserForExternal(): Promise<boolean>;
+    relaunchBrowserForExternal(uaHint?: string): Promise<boolean>;
     /**
      * 外部模式：重新扫描目标帧（面板 #live-frame）并给共享视图帧打「本窗口」标记。
      * 每次 /api/state 都会调用——新窗口的面板是异步出现的，需持续补齐。

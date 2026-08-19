@@ -237,7 +237,8 @@ export class ViewServer {
       // 一键重启浏览器以启用外部原生模式（实时 iframe）：用户从面板确认后调用
       if (p === "/api/relaunch" && method === "POST") {
         if (manager.connected) return this.sendJson(res, 400, { ok: false, error: "外部浏览器已连接，无需重启" });
-        const ok = await manager.relaunchBrowserForExternal();
+        const body = await this.readBody(req);
+        const ok = await manager.relaunchBrowserForExternal(String(body.ua ?? ""));
         if (!ok) return this.sendJson(res, 500, { ok: false, error: "重启失败：找不到浏览器或调试端口未就绪" });
         // 重启成功后尝试建立外部连接（浏览器恢复中，面板出现后由 /api/state 补齐目标帧）
         try {

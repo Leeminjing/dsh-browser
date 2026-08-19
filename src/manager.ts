@@ -282,7 +282,7 @@ export class BrowserManager {
     }
   }
 
-  private findBrowserExe(): string | null {
+  private findBrowserExe(uaHint?: string): string | null {
     const candidates = [
       `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`,
       `${process.env["ProgramFiles(x86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
@@ -290,6 +290,13 @@ export class BrowserManager {
       `${process.env["ProgramFiles(x86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`,
       `${process.env.ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
     ];
+    // 用户正在用的浏览器（UA 含 Edg/ 为 Edge，否则 Chrome）优先
+    if (uaHint && /Edg\//i.test(uaHint)) {
+      const edge = candidates.find((p) => !!p && existsSync(p) && p.includes("Edge"));
+      if (edge) return edge;
+    }
+    const chrome = candidates.find((p) => !!p && existsSync(p) && p.includes("Chrome"));
+    if (chrome) return chrome;
     return candidates.find((p) => !!p && existsSync(p)) ?? null;
   }
 
@@ -298,12 +305,13 @@ export class BrowserManager {
    * 关掉当前浏览器（保留 profile）→ 带 --remote-debugging-port 重启并恢复所有窗口 →
    * 打开 GUI（?dsh-browser=open 自动展开面板）→ 插件探测端口并连接。
    * 只在用户从面板确认后调用（会暂时关闭其浏览器窗口）。
+   * @param uaHint 视图页的 navigator.userAgent，用于判定用户实际使用的浏览器（Chrome/Edge）
    */
-  async relaunchBrowserForExternal(): Promise<boolean> {
+  async relaunchBrowserForExternal(uaHint?: string): Promise<boolean> {
     if (this.context) return false; // 已连接外部浏览器，无需重启
     try {
       const { spawn, execSync } = await import("node:child_process");
-      const exe = this.findBrowserExe();
+      const exe = this.findBrowserExe(uaHint);
       if (!exe) return false;
       const name = exe.includes("Chrome") ? "chrome.exe" : "msedge.exe";
       const gui = this.opts.guiUrl ?? "http://127.0.0.1:3080";
