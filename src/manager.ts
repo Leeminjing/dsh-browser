@@ -8,7 +8,7 @@
 // ============================================================================
 
 import type { BrowserContext, CDPSession, Frame, Page } from "playwright";
-import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Annotation, BrowserStores } from "./stores.js";
 import { buildOverlayExitScript, buildOverlayScript, parseAnnotationPayload } from "./annotations.js";
@@ -119,6 +119,8 @@ export interface BrowserManagerOptions {
   cdpUrl?: string;
   /** 共享视图基础地址（标记/识别帧用） */
   viewBase?: string;
+  /** GUI 地址（自动重启浏览器后打开；默认 http://127.0.0.1:3080） */
+  guiUrl?: string;
   onEvent?: (ev: ManagerEvent) => void;
 }
 
@@ -237,6 +239,11 @@ export class BrowserManager {
     return this.isExternalMode && this.tabs.size > 0 && this.active()?.external === true;
   }
 
+  /** 浏览器实例是否已建立（隔离浏览器已启动，或外部浏览器已连接） */
+  get connected(): boolean {
+    return !!this.context;
+  }
+
   /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
   private async probeExternal(): Promise<string | null> {
     for (const port of [9222, 9223, 9224]) {
@@ -264,6 +271,69 @@ export class BrowserManager {
     this.autoCdpUrl = url;
     await this.ensure();
     await this.refreshExternalTarget();
+  }
+
+  /** 本机是否有可自动重启的浏览器（Chrome/Edge） */
+  get canRelaunchBrowser(): boolean {
+    try {
+      return this.findBrowserExe() !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  private findBrowserExe(): string | null {
+    const candidates = [
+      `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env["ProgramFiles(x86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env["ProgramFiles(x86)"]}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${process.env.ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    ];
+    return candidates.find((p) => !!p && existsSync(p)) ?? null;
+  }
+
+  /**
+   * 自动重启浏览器以启用外部原生模式（实时 iframe）：
+   * 关掉当前浏览器（保留 profile）→ 带 --remote-debugging-port 重启并恢复所有窗口 →
+   * 打开 GUI（?dsh-browser=open 自动展开面板）→ 插件探测端口并连接。
+   * 只在用户从面板确认后调用（会暂时关闭其浏览器窗口）。
+   */
+  async relaunchBrowserForExternal(): Promise<boolean> {
+    if (this.context) return false; // 已连接外部浏览器，无需重启
+    try {
+      const { spawn, execSync } = await import("node:child_process");
+      const exe = this.findBrowserExe();
+      if (!exe) return false;
+      const name = exe.includes("Chrome") ? "chrome.exe" : "msedge.exe";
+      const gui = this.opts.guiUrl ?? "http://127.0.0.1:3080";
+      // 1) 关闭当前浏览器全部实例（profile 保留；--restore-last-session 会恢复窗口）
+      try {
+        execSync(`taskkill /IM ${name} /F`, { stdio: "ignore", windowsHide: true });
+      } catch {
+        /* 可能本来就没在跑 */
+      }
+      await new Promise((r) => setTimeout(r, 900));
+      // 2) 带调试端口重启，恢复上次窗口 + 打开 GUI（自动展开面板）
+      const p = spawn(
+        exe,
+        ["--remote-debugging-port=9222", "--restore-last-session", "--no-first-run", "--no-default-browser-check", `${gui}?dsh-browser=open`],
+        { detached: true, stdio: "ignore" },
+      );
+      p.unref();
+      // 3) 轮询等待 CDP 就绪（最长 ~15s）
+      for (let i = 0; i < 30; i++) {
+        const url = await this.probeExternal();
+        if (url) {
+          this.autoCdpUrl = url;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return !!this.autoCdpUrl;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -359,14 +429,17 @@ export class BrowserManager {
     });
     try {
       await cdp.send("Page.enable");
-      // maxWidth/maxHeight 跟随当前视口：帧像素 = 视口 CSS 像素（1:1），面板铺满
+      // 帧分辨率 = 视口 CSS 尺寸 × DPR（2）：页面按 DPR2 渲染（超采样），
+      // 面板显示时 2x→1x 降采样 → 在高 DPI 屏（DPR2 显示器）上文字依然锐利。
+      // 帧元数据 deviceWidth/Height 仍是 CSS 尺寸，视图侧坐标换算不受影响。
       const vp = this.viewportSize;
+      const dpr = 2;
       await cdp.send("Page.startScreencast", {
         format: "jpeg",
         // quality 85：截图帧是 JPEG 有损编码，太低会让文字边缘发糊
         quality: 85,
-        maxWidth: Math.max(320, vp.width),
-        maxHeight: Math.max(240, vp.height),
+        maxWidth: Math.max(320, vp.width * dpr),
+        maxHeight: Math.max(240, vp.height * dpr),
         everyNthFrame: 1,
       });
     } catch (err) {

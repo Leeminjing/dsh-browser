@@ -49,6 +49,7 @@ export function apply(ctx: Context): void {
     // 注意：外部模式无隔离 profile（spec #3），Agent 操作的是你的真实浏览器。
     cdpUrl: process.env.DSH_BROWSER_CDP_URL || undefined,
     viewBase: `http://127.0.0.1:${DEFAULT_VIEW_PORT}`,
+    guiUrl: process.env.DSH_BROWSER_GUI_URL || "http://127.0.0.1:3080",
   });
 
   // 用户问答（GUI 问题卡片）：权限 / 风险 / 历史 / CDP 批准都走这里

@@ -139,6 +139,8 @@ export interface BrowserManagerOptions {
     cdpUrl?: string;
     /** 共享视图基础地址（标记/识别帧用） */
     viewBase?: string;
+    /** GUI 地址（自动重启浏览器后打开；默认 http://127.0.0.1:3080） */
+    guiUrl?: string;
     onEvent?: (ev: ManagerEvent) => void;
 }
 export declare class BrowserManager {
@@ -167,6 +169,8 @@ export declare class BrowserManager {
     private get isExternalMode();
     /** 外部模式已实际连接并驱动用户浏览器内的共享面板 iframe（无隔离 profile） */
     get external(): boolean;
+    /** 浏览器实例是否已建立（隔离浏览器已启动，或外部浏览器已连接） */
+    get connected(): boolean;
     /** 自动探测本机是否有带调试端口的浏览器（start-external.ps1 用 9222） */
     private probeExternal;
     /**
@@ -174,6 +178,16 @@ export declare class BrowserManager {
      * 则进入外部浏览器模式（原生实时视图）；否则什么都不做（保持内置隔离模式，绝不弹窗）。
      */
     tryConnectExternal(): Promise<void>;
+    /** 本机是否有可自动重启的浏览器（Chrome/Edge） */
+    get canRelaunchBrowser(): boolean;
+    private findBrowserExe;
+    /**
+     * 自动重启浏览器以启用外部原生模式（实时 iframe）：
+     * 关掉当前浏览器（保留 profile）→ 带 --remote-debugging-port 重启并恢复所有窗口 →
+     * 打开 GUI（?dsh-browser=open 自动展开面板）→ 插件探测端口并连接。
+     * 只在用户从面板确认后调用（会暂时关闭其浏览器窗口）。
+     */
+    relaunchBrowserForExternal(): Promise<boolean>;
     /**
      * 外部模式：重新扫描目标帧（面板 #live-frame）并给共享视图帧打「本窗口」标记。
      * 每次 /api/state 都会调用——新窗口的面板是异步出现的，需持续补齐。
