@@ -225,29 +225,11 @@ export class ViewServer {
           state: await manager.state(),
           external: manager.external,
           externalError,
-          // 未进外部模式且本机有可重启的浏览器 → 视图可展示「一键重启浏览器启用原生视图」卡片
-          // 注意：隔离内置浏览器是否在跑不影响卡片（重启时会先释放它）
-          relaunchable: !manager.external && manager.canRelaunchBrowser,
           devMode: stores.getDevMode(),
           sites: stores.listSitePermissions(),
           annotations: stores.listAnnotations(),
           viewBase: this.baseUrl,
         });
-      }
-
-      // 一键重启浏览器以启用外部原生模式（实时 iframe）：用户从面板确认后调用
-      if (p === "/api/relaunch" && method === "POST") {
-        if (manager.external) return this.sendJson(res, 400, { ok: false, error: "外部浏览器已连接，无需重启" });
-        const body = await this.readBody(req);
-        const result = await manager.relaunchBrowserForExternal(String(body.ua ?? ""));
-        if (!result.ok) return this.sendJson(res, 500, { ok: false, error: result.error ?? "重启失败" });
-        // 重启成功后尝试建立外部连接（浏览器恢复中，面板出现后由 /api/state 补齐目标帧）
-        try {
-          await manager.ensure();
-        } catch {
-          /* 面板尚未出现，稍后 /api/state 会重试 */
-        }
-        return this.sendJson(res, 200, { ok: true });
       }
 
       if (p === "/api/screenshot" && method === "GET") {
